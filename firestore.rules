@@ -1,0 +1,231 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Global Safety Net
+    match /{document=**} { allow read, write: if false; }
+
+    // ===============================================================
+    // Assumed Data Model
+    // ===============================================================
+    //
+    // Collection: products
+    // Document ID: productId
+    // Fields: id, name, purchasePrice, salePrice, unit, stock, category, etc.
+    //
+    // Collection: categories
+    // Document ID: categoryId
+    // Fields: id, name, slug
+    //
+    // Collection: customers
+    // Document ID: customerId (often matches uid)
+    // Fields: id, uid, name, phone, email, address, etc.
+    //
+    // Collection: staff
+    // Document ID: staffId (often matches uid)
+    // Fields: id, uid, name, designation, email, isApproved, etc.
+    //
+    // Collection: sales
+    // Document ID: saleId
+    // Fields: id, invoiceNo, customerId, total, status, etc.
+    //
+    // ===============================================================
+
+    // ===============================================================
+    // Helper Functions
+    // ===============================================================
+    
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    function isOwnerEmail() {
+      return isAuthenticated() && (request.auth.token.email == "smsagor6980@gmail.com");
+    }
+
+    function isAdmin() {
+      return isAuthenticated() && (
+        isOwnerEmail() ||
+        (exists(/databases/$(database)/documents/staff/$(request.auth.uid)) && 
+         get(/databases/$(database)/documents/staff/$(request.auth.uid)).data.designation in ['Admin', 'Owner', 'Manager'])
+      );
+    }
+
+    function isStaff() {
+      return isAuthenticated() && (
+        isOwnerEmail() ||
+        exists(/databases/$(database)/documents/staff/$(request.auth.uid))
+      );
+    }
+
+    function isApprovedStaff() {
+      return isStaff() && (
+        isOwnerEmail() ||
+        get(/databases/$(database)/documents/staff/$(request.auth.uid)).data.isApproved == true
+      );
+    }
+
+    function isValidId(id) { 
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$'); 
+    }
+
+    function isValidProduct(data) {
+      return data.keys().hasAll(['id', 'name', 'purchasePrice', 'salePrice', 'category', 'stock', 'unit']) &&
+             isValidId(data.id) &&
+             data.name is string && data.name.size() <= 256 &&
+             data.purchasePrice is number &&
+             data.salePrice is number &&
+             data.category is string &&
+             data.stock is number &&
+             data.unit is string &&
+             (data.get('imageUrl', null) == null || (data.imageUrl is string && data.imageUrl.size() <= 2000)) &&
+             (data.get('sku', null) == null || (data.sku is string && data.sku.size() <= 128));
+    }
+
+    function isValidStockEntry(data) {
+      return data.keys().hasAll(['id', 'productId', 'productName', 'quantity', 'date']) &&
+             data.keys().size() >= 5 && data.keys().size() <= 7 &&
+             isValidId(data.id) &&
+             isValidId(data.productId) &&
+             data.productName is string && data.productName.size() <= 256 &&
+             data.quantity is number &&
+             data.date is string && data.date.size() <= 64 &&
+             (data.get('addedBy', null) == null || isValidId(data.addedBy)) &&
+             (data.get('note', null) == null || (data.note is string && data.note.size() <= 500));
+    }
+
+    // ===============================================================
+    // Rules
+    // ===============================================================
+
+    // Products & Categories are publicly readable for the shop
+    match /products/{productId} {
+      allow read: if true;
+      allow create: if isApprovedStaff() && isValidId(productId) && isValidProduct(request.resource.data);
+      allow update: if isValidId(productId) && (
+        (isApprovedStaff() && isValidProduct(request.resource.data)) ||
+        (isAuthenticated() && 
+         request.resource.data.diff(resource.data).affectedKeys().hasOnly(['stock']) &&
+         request.resource.data.stock is number &&
+         request.resource.data.stock >= 0 &&
+         request.resource.data.stock <= resource.data.stock)
+      );
+      allow delete: if isAdmin() && isValidId(productId);
+    }
+
+    match /categories/{categoryId} {
+      allow read: if true;
+      allow write: if isApprovedStaff();
+    }
+
+    match /roles/{roleId} {
+      allow read: if isApprovedStaff();
+      allow write: if isAdmin();
+    }
+
+    match /customers/{customerId} {
+      // Customers can read/write their own profile
+      // Staff can read/write all customers
+      allow read: if isOwner(customerId) || isApprovedStaff() || (isAuthenticated() && resource.data.uid == request.auth.uid);
+      allow write: if isOwner(customerId) || isApprovedStaff() || (isAuthenticated() && request.resource.data.uid == request.auth.uid);
+    }
+
+    match /staff/{staffId} {
+      // Staff can read their own profile
+      // Admins can read/write all staff
+      allow read: if isOwner(staffId) || isApprovedStaff();
+      allow create: if isAuthenticated(); // Allow registration
+      allow update, delete: if isAdmin() || (isOwner(staffId) && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['isApproved', 'designation', 'roleId']));
+    }
+
+    match /sales/{saleId} {
+      // Customers can read their own sales
+      // Staff can read/write all sales
+      allow read: if isApprovedStaff() || (isAuthenticated() && resource.data.customerId == request.auth.uid);
+      allow create: if isAuthenticated(); // Allow placing orders
+      allow update, delete: if isApprovedStaff();
+    }
+
+    match /suppliers/{supplierId} {
+      allow read, write: if isApprovedStaff();
+    }
+
+    match /supplier_payments/{paymentId} {
+      allow read, write: if isApprovedStaff();
+    }
+
+    match /purchases/{purchaseId} {
+      allow read, write: if isApprovedStaff();
+    }
+
+    match /collections/{collectionId} {
+      allow read, write: if isApprovedStaff();
+    }
+
+    match /expenses/{expenseId} {
+      allow read, write: if isApprovedStaff();
+    }
+
+    match /activities/{activityId} {
+      allow read: if isApprovedStaff();
+      allow create: if isAuthenticated();
+      allow update, delete: if isAdmin();
+    }
+
+    match /returns/{returnId} {
+      allow read, write: if isApprovedStaff();
+    }
+
+    match /attendances/{attendanceId} {
+      allow read: if isApprovedStaff();
+      // Allow users to check themselves in/out
+      allow create: if isApprovedStaff() && request.resource.data.staffId == request.auth.uid;
+      allow update: if isAdmin() || (isApprovedStaff() && resource.data.staffId == request.auth.uid);
+      allow delete: if isAdmin();
+    }
+
+    match /leaves/{leaveId} {
+      allow read: if isApprovedStaff();
+      // Staff can apply for their own leave
+      allow create: if isApprovedStaff() && request.resource.data.staffId == request.auth.uid;
+      // Admins can approve/reject, Users can update their own PENDING requests (e.g. change reason)
+      allow update: if isAdmin() || (isApprovedStaff() && resource.data.staffId == request.auth.uid && resource.data.status == 'Pending');
+      allow delete: if isAdmin();
+    }
+
+    match /payrolls/{payrollId} {
+      allow read: if isApprovedStaff();
+      allow write: if isAdmin();
+    }
+
+    match /loans/{loanId} {
+      allow read: if isApprovedStaff();
+      allow write: if isApprovedStaff();
+    }
+
+    match /reimbursements/{reimbursementId} {
+      allow read: if isApprovedStaff();
+      allow write: if isApprovedStaff();
+    }
+    
+    match /settings/{settingId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+    
+    match /ranks/{rankId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    match /stock_entries/{entryId} {
+      allow get: if isApprovedStaff() && isValidId(entryId);
+      allow list: if isApprovedStaff();
+      allow create: if isApprovedStaff() && isValidId(entryId) && isValidStockEntry(request.resource.data);
+      allow update, delete: if isAdmin() && isValidId(entryId);
+    }
+  }
+}

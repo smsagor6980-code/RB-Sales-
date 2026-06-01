@@ -1,0 +1,157 @@
+{
+  "entities": {
+    "Product": {
+      "title": "Product",
+      "description": "A product in the inventory",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "sku": { "type": "string" },
+        "name": { "type": "string" },
+        "purchasePrice": { "type": "number" },
+        "salePrice": { "type": "number" },
+        "wholesalePrice": { "type": "number" },
+        "distributorPrice": { "type": "number" },
+        "dealerPrice": { "type": "number" },
+        "unit": { "type": "string", "enum": ["pcs", "kg", "box", "pkt"] },
+        "stock": { "type": "number" },
+        "minStock": { "type": "number" },
+        "category": { "type": "string" },
+        "description": { "type": "string" },
+        "imageUrl": { "type": "string" },
+        "dateAdded": { "type": "string", "format": "date-time" },
+        "status": { "type": "string", "enum": ["active", "inactive"] }
+      },
+      "required": ["id", "name", "purchasePrice", "salePrice", "unit", "stock", "category"]
+    },
+    "ProductCategory": {
+      "title": "ProductCategory",
+      "description": "A category for products",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "slug": { "type": "string" }
+      },
+      "required": ["id", "name", "slug"]
+    },
+    "AppRole": {
+      "title": "AppRole",
+      "description": "A user role with permissions",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "permissions": { "type": "array", "items": { "type": "string" } },
+        "isDefault": { "type": "boolean" }
+      },
+      "required": ["id", "name", "permissions"]
+    },
+    "Customer": {
+      "title": "Customer",
+      "description": "A customer of the business",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "uid": { "type": "string" },
+        "name": { "type": "string" },
+        "phone": { "type": "string" },
+        "email": { "type": "string", "format": "email" },
+        "address": { "type": "string" },
+        "dueAmount": { "type": "number" },
+        "type": { "type": "string", "enum": ["retail", "wholesale", "distributor"] },
+        "status": { "type": "string" },
+        "dateAdded": { "type": "string", "format": "date-time" },
+        "totalPurchase": { "type": "number" },
+        "totalPaid": { "type": "number" },
+        "wishlist": { "type": "array", "items": { "$ref": "WishlistItem" } },
+        "notifications": { "type": "array", "items": { "$ref": "AppNotification" } }
+      },
+      "required": ["id", "name", "phone", "dueAmount", "type", "status", "dateAdded"]
+    },
+    "Staff": {
+      "title": "Staff",
+      "description": "A staff member",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "uid": { "type": "string" },
+        "name": { "type": "string" },
+        "designation": { "type": "string" },
+        "roleId": { "type": "string" },
+        "phone": { "type": "string" },
+        "email": { "type": "string", "format": "email" },
+        "status": { "type": "string", "enum": ["active", "inactive"] },
+        "joinedDate": { "type": "string", "format": "date-time" },
+        "isApproved": { "type": "boolean" }
+      },
+      "required": ["id", "name", "designation", "phone", "email", "status", "joinedDate", "isApproved"]
+    },
+    "Sale": {
+      "title": "Sale",
+      "description": "A sales transaction",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "invoiceNo": { "type": "string" },
+        "customerId": { "type": "string" },
+        "customerType": { "type": "string", "enum": ["retail", "wholesale", "distributor"] },
+        "date": { "type": "string", "format": "date-time" },
+        "total": { "type": "number" },
+        "paid": { "type": "number" },
+        "due": { "type": "number" },
+        "status": { "type": "string", "enum": ["pending", "approved", "delivered", "cancelled", "due", "paid"] }
+      },
+      "required": ["id", "invoiceNo", "date", "total", "paid", "due", "status"]
+    },
+    "StockEntry": {
+      "title": "StockEntry",
+      "description": "A record of stock added to inventory",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "productId": { "type": "string" },
+        "productName": { "type": "string" },
+        "quantity": { "type": "number" },
+        "date": { "type": "string", "format": "date-time" },
+        "addedBy": { "type": "string" },
+        "note": { "type": "string" }
+      },
+      "required": ["id", "productId", "productName", "quantity", "date"]
+    }
+  },
+  "firestore": {
+    "/products/{productId}": {
+      "schema": "Product",
+      "description": "Collection of products"
+    },
+    "/categories/{categoryId}": {
+      "schema": "ProductCategory",
+      "description": "Collection of product categories"
+    },
+    "/roles/{roleId}": {
+      "schema": "AppRole",
+      "description": "Collection of app roles"
+    },
+    "/customers/{customerId}": {
+      "schema": "Customer",
+      "description": "Collection of customers"
+    },
+    "/staff/{staffId}": {
+      "schema": "Staff",
+      "description": "Collection of staff members"
+    },
+    "/sales/{saleId}": {
+      "schema": "Sale",
+      "description": "Collection of sales transactions"
+    },
+    "/stock_entries/{entryId}": {
+      "schema": "StockEntry",
+      "description": "Collection of stock entries"
+    },
+    "/supplier_payments/{paymentId}": {
+      "schema": "object",
+      "description": "Collection of supplier payments"
+    }
+  }
+}

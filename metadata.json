@@ -1,0 +1,7 @@
+{
+  "name": "REST BAZER",
+  "description": "A complete business management system with POS, Inventory, CRM, and E-commerce features.",
+  "requestFramePermissions": [
+    "camera"
+  ]
+}

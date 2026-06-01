@@ -1,0 +1,79 @@
+
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="theme-color" content="#1e1e5f" />
+    <title>REST BAZER - Business Management</title>
+    
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800;900&display=swap" rel="stylesheet">
+    
+    <style>
+      /* Smooth Scrolling and Scrollbar Styling */
+      html { scroll-behavior: smooth; }
+      
+      .custom-scrollbar::-webkit-scrollbar { width: 6px; height: 6px; }
+      .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
+      .custom-scrollbar::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 10px; }
+      .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+
+      .no-scrollbar::-webkit-scrollbar { display: none; }
+      .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+      
+      body { 
+        overscroll-behavior-y: none; 
+        -webkit-tap-highlight-color: transparent;
+        -webkit-font-smoothing: antialiased;
+        text-rendering: optimizeLegibility;
+        font-weight: 700; 
+        color: #0f172a;
+        padding-bottom: env(safe-area-inset-bottom);
+        min-height: 100vh;
+        min-height: 100dvh;
+      }
+
+      #root {
+        min-height: 100vh;
+        min-height: 100dvh;
+        display: flex;
+        flex-direction: column;
+      }
+
+      input, select, textarea, button {
+        font-size: 16px !important;
+      }
+
+      /* Enhanced Modal Scrolling for Mobile */
+      @media (max-width: 640px) {
+        .modal-container {
+          padding: 0 !important;
+          align-items: flex-start !important;
+        }
+        .modal-content-full {
+          width: 100% !important;
+          height: 100% !important;
+          min-height: 100dvh !important;
+          max-height: 100dvh !important;
+          border-radius: 0 !important;
+          overflow-y: auto !important;
+          -webkit-overflow-scrolling: touch;
+        }
+        /* Extra padding for fixed footers on mobile in modals */
+        .modal-footer-gap {
+          padding-bottom: calc(100px + env(safe-area-inset-bottom)) !important;
+        }
+      }
+
+      .font-black { font-weight: 900 !important; }
+      .tracking-tightest { letter-spacing: -0.05em !important; }
+      
+      /* Active state animations */
+      .active-scale:active { transform: scale(0.96); }
+    </style>
+</head>
+  <body class="bg-slate-50 antialiased overflow-x-hidden custom-scrollbar">
+    <div id="root"></div>
+    <script type="module" src="/index.tsx"></script>
+</body>
+</html>
