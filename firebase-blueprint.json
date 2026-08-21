@@ -118,6 +118,26 @@
         "note": { "type": "string" }
       },
       "required": ["id", "productId", "productName", "quantity", "date"]
+    },
+    "CustomerLoan": {
+      "title": "CustomerLoan",
+      "description": "A loan or advance given to a customer",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "loanNo": { "type": "string" },
+        "customerId": { "type": "string" },
+        "customerName": { "type": "string" },
+        "customerPhone": { "type": "string" },
+        "type": { "type": "string", "enum": ["advance", "loan"] },
+        "amount": { "type": "number" },
+        "remainingAmount": { "type": "number" },
+        "date": { "type": "string" },
+        "disbursedMethod": { "type": "string" },
+        "purpose": { "type": "string" },
+        "status": { "type": "string", "enum": ["active", "repaid", "overdue"] }
+      },
+      "required": ["id", "customerId", "customerName", "type", "amount", "remainingAmount", "date", "status"]
     }
   },
   "firestore": {
@@ -152,6 +172,10 @@
     "/supplier_payments/{paymentId}": {
       "schema": "object",
       "description": "Collection of supplier payments"
+    },
+    "/customer_loans/{loanId}": {
+      "schema": "CustomerLoan",
+      "description": "Collection of customer advance and loans"
     }
   }
 }

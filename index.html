@@ -7,7 +7,9 @@
     <meta name="theme-color" content="#1e1e5f" />
     <title>REST BAZER - Business Management</title>
     
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800;900&display=swap" rel="stylesheet">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Hind+Siliguri:wght@500;600;700&family=Inter:wght@400;600;700;800;900&family=Noto+Sans+Bengali:wght@500;600;700;800;900&display=swap" rel="stylesheet">
     
     <style>
       /* Smooth Scrolling and Scrollbar Styling */
@@ -73,6 +75,30 @@
     </style>
 </head>
   <body class="bg-slate-50 antialiased overflow-x-hidden custom-scrollbar">
+    <script>
+      window.addEventListener('error', function(e) {
+        var overlay = document.getElementById('error-overlay');
+        if (!overlay) {
+          overlay = document.createElement('div');
+          overlay.id = 'error-overlay';
+          overlay.style = 'position:fixed;top:0;left:0;width:100%;height:100%;background:#fef2f2;color:#991b1b;padding:2rem;z-index:999999;overflow:auto;font-family:monospace;border:4px solid #f87171;';
+          document.body.appendChild(overlay);
+        }
+        overlay.innerHTML = '<h1>🔴 Runtime Error</h1><p style="font-size:1.2rem;font-weight:bold;">' + e.message + '</p><p><b>File:</b> ' + e.filename + ':' + e.lineno + ':' + e.colno + '</p><pre style="background:#fee2e2;padding:1rem;border-radius:8px;border:1px solid #fca5a5;">' + (e.error ? e.error.stack : 'No stack trace available') + '</pre>';
+      });
+      window.addEventListener('unhandledrejection', function(e) {
+        var overlay = document.getElementById('error-overlay');
+        if (!overlay) {
+          overlay = document.createElement('div');
+          overlay.id = 'error-overlay';
+          overlay.style = 'position:fixed;top:0;left:0;width:100%;height:100%;background:#fef2f2;color:#991b1b;padding:2rem;z-index:999999;overflow:auto;font-family:monospace;border:4px solid #f87171;';
+          document.body.appendChild(overlay);
+        }
+        var msg = e.reason ? (e.reason.message || e.reason.toString()) : 'Unknown promise rejection';
+        var stack = e.reason && e.reason.stack ? e.reason.stack : 'No stack trace available';
+        overlay.innerHTML = '<h1>🔴 Unhandled Promise Rejection</h1><p style="font-size:1.2rem;font-weight:bold;">' + msg + '</p><pre style="background:#fee2e2;padding:1rem;border-radius:8px;border:1px solid #fca5a5;">' + stack + '</pre>';
+      });
+    </script>
     <div id="root"></div>
     <script type="module" src="/index.tsx"></script>
 </body>

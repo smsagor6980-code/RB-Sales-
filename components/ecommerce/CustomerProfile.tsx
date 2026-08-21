@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { User, Package, Heart, Bell, Settings, LogOut, ChevronRight, ShoppingBag, Clock, CheckCircle2, XCircle, Download, TrendingUp, Calendar, CreditCard, ArrowLeft, Gift, Sparkles, RefreshCcw, Award, ShieldCheck, Zap } from 'lucide-react';
+import { User, Package, Heart, Bell, Settings, LogOut, ChevronRight, ShoppingBag, Clock, CheckCircle2, XCircle, Download, TrendingUp, Calendar, CreditCard, ArrowLeft, Gift, Sparkles, RefreshCcw, Award, ShieldCheck, Zap, AlertTriangle } from 'lucide-react';
 import { Customer, Sale, WishlistItem, AppNotification, Product, RankConfig, ShopSettings } from '../../types';
 import { motion, AnimatePresence } from 'framer-motion';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
@@ -42,6 +42,20 @@ const CustomerProfile: React.FC<CustomerProfileProps> = ({
   const [activeTab, setActiveTab] = useState<'overview' | 'orders' | 'wishlist' | 'notifications' | 'settings' | 'lucky'>(initialTab);
   const [isSpinning, setIsSpinning] = useState(false);
   const [reward, setReward] = useState<{ type: string; value: string; code: string } | null>(null);
+
+  const [editName, setEditName] = useState(customer.name);
+  const [editNameColor, setEditNameColor] = useState(customer.nameColor || '');
+  const [editEmail, setEditEmail] = useState(customer.email || '');
+  const [editAddress, setEditAddress] = useState(customer.address || '');
+  const [editPhone, setEditPhone] = useState(customer.phone);
+
+  React.useEffect(() => {
+    setEditName(customer.name);
+    setEditNameColor(customer.nameColor || '');
+    setEditEmail(customer.email || '');
+    setEditAddress(customer.address || '');
+    setEditPhone(customer.phone);
+  }, [customer]);
 
   // Check if can spin (once every 24h)
   const canSpin = !customer.lastSpinDate || 
@@ -92,9 +106,12 @@ const CustomerProfile: React.FC<CustomerProfileProps> = ({
 
   const getStatusColor = (status: string) => {
     switch (status) {
-      case 'delivered': return 'bg-emerald-50 text-emerald-500 border-emerald-100';
-      case 'pending': return 'bg-amber-50 text-amber-500 border-amber-100';
-      case 'cancelled': return 'bg-rose-50 text-rose-500 border-rose-100';
+      case 'delivered': return 'bg-emerald-50 text-emerald-600 border-emerald-200';
+      case 'approved': return 'bg-blue-50 text-blue-600 border-blue-200';
+      case 'undelivered': return 'bg-rose-50 text-rose-600 border-rose-200';
+      case 'partial': return 'bg-amber-50 text-amber-600 border-amber-200';
+      case 'pending': return 'bg-blue-50 text-blue-600 border-blue-200';
+      case 'cancelled': return 'bg-slate-100 text-slate-500 border-slate-200';
       default: return 'bg-slate-50 text-slate-500 border-slate-100';
     }
   };
@@ -102,6 +119,9 @@ const CustomerProfile: React.FC<CustomerProfileProps> = ({
   const getStatusIcon = (status: string) => {
     switch (status) {
       case 'delivered': return <CheckCircle2 size={14} />;
+      case 'approved': return <CheckCircle2 size={14} />;
+      case 'undelivered': return <XCircle size={14} />;
+      case 'partial': return <AlertTriangle size={14} />;
       case 'pending': return <Clock size={14} />;
       case 'cancelled': return <XCircle size={14} />;
       default: return <Package size={14} />;
@@ -118,7 +138,18 @@ const CustomerProfile: React.FC<CustomerProfileProps> = ({
               {customer.name.charAt(0)}
             </div>
             <div>
-              <h2 className="font-black text-slate-800 text-base sm:text-xl tracking-tight leading-tight">{customer.name}</h2>
+              <h2 
+                className="font-black text-base sm:text-xl tracking-tight leading-tight uppercase flex items-center gap-1.5"
+                style={{ color: customer.nameColor || '#1e293b' }}
+              >
+                <span>{customer.name}</span>
+                {customer.nameColor && (
+                  <span 
+                    className="w-2.5 h-2.5 rounded-full inline-block shrink-0 border border-white shadow-xs" 
+                    style={{ backgroundColor: customer.nameColor }}
+                  />
+                )}
+              </h2>
               <p className="text-[8px] sm:text-[10px] font-black text-slate-400 uppercase tracking-widest mt-0.5 sm:mt-1">{customer.phone}</p>
             </div>
           </div>
@@ -191,7 +222,7 @@ const CustomerProfile: React.FC<CustomerProfileProps> = ({
                   </div>
                   <div>
                     <p className="text-[8px] sm:text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">মাসিক খরচ</p>
-                    <h3 className="text-xl font-black text-slate-800">৳{profileStats.monthly.toLocaleString()}</h3>
+                    <h3 className="text-xl font-black text-slate-800">৳{(profileStats.monthly ?? 0).toLocaleString()}</h3>
                   </div>
                   <div className="w-full h-1.5 bg-slate-50 rounded-full overflow-hidden">
                     <div className="h-full bg-primary transition-all duration-1000" style={{ width: `${targetProgress.m}%` }}></div>
@@ -207,7 +238,7 @@ const CustomerProfile: React.FC<CustomerProfileProps> = ({
                   </div>
                   <div>
                     <p className="text-[8px] sm:text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">বার্ষিক খরচ</p>
-                    <h3 className="text-xl font-black text-slate-800">৳{profileStats.yearly.toLocaleString()}</h3>
+                    <h3 className="text-xl font-black text-slate-800">৳{(profileStats.yearly ?? 0).toLocaleString()}</h3>
                   </div>
                   <div className="w-full h-1.5 bg-slate-50 rounded-full overflow-hidden">
                     <div className="h-full bg-indigo-500 transition-all duration-1000" style={{ width: `${targetProgress.y}%` }}></div>
@@ -223,7 +254,7 @@ const CustomerProfile: React.FC<CustomerProfileProps> = ({
                   </div>
                   <div>
                     <p className="text-[8px] sm:text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">মোট খরচ</p>
-                    <h3 className="text-xl font-black text-slate-800">৳{profileStats.lifetime.toLocaleString()}</h3>
+                    <h3 className="text-xl font-black text-slate-800">৳{(profileStats.lifetime ?? 0).toLocaleString()}</h3>
                   </div>
                   <div className="w-full h-1.5 bg-slate-50 rounded-full overflow-hidden">
                     <div className="h-full bg-amber-500 transition-all duration-1000" style={{ width: `${targetProgress.l}%` }}></div>
@@ -236,7 +267,7 @@ const CustomerProfile: React.FC<CustomerProfileProps> = ({
                   <div className="flex justify-between items-center mb-6">
                     <div>
                       <h3 className="font-black text-slate-800 text-xl tracking-tight">পরবর্তী র‍্যাঙ্ক: {nextRank.name}</h3>
-                      <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mt-1">৳{(nextRank.minAmount - totalSpent).toLocaleString()} খরচ করলে আপনি {nextRank.name} মেম্বার হবেন।</p>
+                      <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mt-1">৳{(Math.max(0, nextRank.minAmount - totalSpent) ?? 0).toLocaleString()} খরচ করলে আপনি {nextRank.name} মেম্বার হবেন।</p>
                     </div>
                     <div className="text-right">
                       <span className="text-2xl font-black text-primary">{Math.round(progressToNext)}%</span>
@@ -374,7 +405,7 @@ const CustomerProfile: React.FC<CustomerProfileProps> = ({
                       <div className="flex items-center gap-2 sm:gap-10">
                         <div className="text-right hidden sm:block">
                           <p className="text-[8px] sm:text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">পরিমাণ</p>
-                          <p className="font-black text-slate-800 text-sm">৳{order.total.toLocaleString()}</p>
+                          <p className="font-black text-slate-800 text-sm">৳{(order.total ?? 0).toLocaleString()}</p>
                         </div>
                         <div className={`px-3 sm:px-4 py-1.5 sm:py-2 rounded-lg sm:rounded-xl text-[8px] sm:text-[10px] font-black uppercase tracking-widest flex items-center gap-1.5 sm:gap-2 border ${getStatusColor(order.status)}`}>
                           <span className="hidden sm:inline">{getStatusIcon(order.status)}</span>
@@ -441,7 +472,7 @@ const CustomerProfile: React.FC<CustomerProfileProps> = ({
                         <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between md:justify-end gap-6 sm:gap-10 border-t sm:border-t-0 pt-6 sm:pt-0">
                           <div className="text-left sm:text-right">
                             <p className="text-[8px] sm:text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">মোট মূল্য</p>
-                            <p className="font-black text-primary text-xl sm:text-2xl tracking-tighter">৳{order.total.toLocaleString()}</p>
+                            <p className="font-black text-primary text-xl sm:text-2xl tracking-tighter">৳{(order.total ?? 0).toLocaleString()}</p>
                           </div>
                           <div className="flex gap-2 w-full sm:w-auto">
                             <button onClick={() => onViewOrder(order)} className="flex-1 sm:flex-none px-4 sm:px-6 py-3 sm:py-4 rounded-xl sm:rounded-2xl bg-slate-50 text-slate-600 font-black text-[10px] sm:text-xs uppercase tracking-widest hover:bg-slate-100 transition-all">বিস্তারিত</button>
@@ -535,7 +566,7 @@ const CustomerProfile: React.FC<CustomerProfileProps> = ({
                                 }
                                 setIsSpinning(true);
                                 setTimeout(() => {
-                                  const rewards = shopSettings.luckyRewards?.rewards || [];
+                                  const rewards = shopSettings?.luckyRewards?.rewards || [];
                                   if (rewards.length === 0) {
                                     alert('দুঃখিত, কোনো রিওয়ার্ড পাওয়া যায়নি।');
                                     setIsSpinning(false);
@@ -808,7 +839,7 @@ const CustomerProfile: React.FC<CustomerProfileProps> = ({
                         </div>
                         <div className="p-6 sm:p-8">
                           <h4 className="font-black text-slate-800 text-base sm:text-lg mb-1 sm:mb-2 line-clamp-1">{product.name}</h4>
-                          <p className="font-black text-primary text-lg sm:text-xl tracking-tighter mb-4 sm:mb-6">৳{product.salePrice.toLocaleString()}</p>
+                          <p className="font-black text-primary text-lg sm:text-xl tracking-tighter mb-4 sm:mb-6">৳{(product.salePrice ?? 0).toLocaleString()}</p>
                           <button 
                             onClick={() => onAddToCart(product)}
                             className="w-full bg-primary text-white py-3 sm:py-4 rounded-xl sm:rounded-2xl font-black uppercase text-[10px] sm:text-xs shadow-lg shadow-primary/20 hover:scale-[1.02] active:scale-[0.98] transition-all"
@@ -863,6 +894,153 @@ const CustomerProfile: React.FC<CustomerProfileProps> = ({
                   ))
                 )}
               </div>
+            </motion.div>
+          )}
+
+          {activeTab === 'settings' && (
+            <motion.div
+              key="settings"
+              initial={{ opacity: 0, x: 20 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: -20 }}
+              className="max-w-2xl space-y-8 animate-in fade-in duration-300"
+            >
+              <div>
+                <h2 className="text-2xl sm:text-3xl font-black text-slate-800 tracking-tight uppercase leading-none">প্রোফাইল সেটিংস</h2>
+                <p className="text-slate-400 font-bold uppercase tracking-widest text-[10px] sm:text-xs mt-2">আপনার প্রোফাইল তথ্য এবং ঠিকানা পরিবর্তন করুন</p>
+              </div>
+
+              <form 
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  onUpdateCustomer({
+                    ...customer,
+                    name: editName,
+                    nameColor: editNameColor || undefined,
+                    email: editEmail,
+                    address: editAddress,
+                    phone: editPhone
+                  });
+                  alert('প্রোফাইল সফলভাবে আপডেট করা হয়েছে!');
+                }}
+                className="bg-white p-6 sm:p-10 rounded-[32px] sm:rounded-[40px] border border-slate-100 shadow-sm space-y-6"
+              >
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
+                  <div>
+                    <label className="text-[10px] font-black text-slate-600 uppercase tracking-widest mb-2 block ml-1">পূর্ণ নাম</label>
+                    <input 
+                      required 
+                      type="text"
+                      className="w-full border-2 border-slate-100 rounded-2xl p-4 font-black text-xs sm:text-sm bg-white outline-none focus:ring-4 focus:ring-primary/5 transition-all" 
+                      style={{ color: editNameColor || undefined }}
+                      value={editName} 
+                      onChange={e => setEditName(e.target.value)} 
+                      placeholder="আপনার নাম লিখুন" 
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[10px] font-black text-slate-600 uppercase tracking-widest mb-2 block ml-1">মোবাইল নম্বর</label>
+                    <input 
+                      required 
+                      type="text"
+                      disabled
+                      className="w-full border-2 border-slate-100 rounded-2xl p-4 font-black text-xs sm:text-sm bg-slate-100 text-slate-400 cursor-not-allowed outline-none" 
+                      value={editPhone} 
+                      placeholder="01XXX-XXXXXX" 
+                    />
+                  </div>
+                </div>
+
+                {/* Name Color Control */}
+                <div className="p-4 bg-slate-50 rounded-2xl border border-slate-100 space-y-2.5">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[10px] font-black text-slate-600 uppercase tracking-widest block">
+                      নামের টেক্সট কালার
+                    </span>
+                    <span 
+                      className="text-xs font-black uppercase px-2.5 py-1 rounded-xl bg-slate-900 shadow-xs"
+                      style={{ color: editNameColor || '#ffffff' }}
+                    >
+                      {editName || 'নাম প্রিভিউ'}
+                    </span>
+                  </div>
+
+                  <div className="flex flex-wrap items-center gap-2 pt-1">
+                    <button
+                      type="button"
+                      onClick={() => setEditNameColor('')}
+                      className={`text-[10px] font-bold px-3 py-1.5 rounded-xl border transition-all ${
+                        !editNameColor ? 'bg-slate-900 text-white border-slate-900' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-100'
+                      }`}
+                    >
+                      ডিফল্ট কালার
+                    </button>
+                    {[
+                      { name: 'গোল্ডেন ইয়েলো', hex: '#facc15' },
+                      { name: 'এমারেল্ড গ্রিন', hex: '#10b981' },
+                      { name: 'স্কাই ব্লু', hex: '#0284c7' },
+                      { name: 'রোজ পিঙ্ক', hex: '#f43f5e' },
+                      { name: 'পার্পল', hex: '#a855f7' },
+                      { name: 'অরেঞ্জ', hex: '#f97316' },
+                      { name: 'সায়ান', hex: '#06b6d4' },
+                      { name: 'হোয়াইট', hex: '#ffffff' }
+                    ].map(preset => {
+                      const isSel = (editNameColor || '').toLowerCase() === preset.hex.toLowerCase();
+                      return (
+                        <button
+                          key={preset.hex}
+                          type="button"
+                          onClick={() => setEditNameColor(preset.hex)}
+                          className={`w-6 h-6 rounded-full border transition-all shrink-0 ${
+                            isSel ? 'scale-125 ring-2 ring-slate-900 border-white' : 'border-slate-300 hover:scale-110'
+                          }`}
+                          style={{ backgroundColor: preset.hex }}
+                          title={preset.name}
+                        />
+                      );
+                    })}
+                    <div className="flex items-center gap-1 pl-2 border-l border-slate-200">
+                      <span className="text-[10px] font-bold text-slate-500">কাস্টম:</span>
+                      <input
+                        type="color"
+                        value={editNameColor || '#facc15'}
+                        onChange={e => setEditNameColor(e.target.value)}
+                        className="w-7 h-7 rounded-xl cursor-pointer border border-slate-200 p-0.5 bg-white shadow-xs shrink-0"
+                        title="কাস্টম কালার পিক করুন"
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                <div>
+                  <label className="text-[10px] font-black text-slate-600 uppercase tracking-widest mb-2 block ml-1">ইমেইল ঠিকানা</label>
+                  <input 
+                    type="email"
+                    className="w-full border-2 border-slate-100 rounded-2xl p-4 font-black text-xs sm:text-sm bg-slate-50 outline-none focus:bg-white focus:ring-4 focus:ring-primary/5 transition-all" 
+                    value={editEmail} 
+                    onChange={e => setEditEmail(e.target.value)} 
+                    placeholder="example@mail.com" 
+                  />
+                </div>
+
+                <div>
+                  <label className="text-[10px] font-black text-slate-600 uppercase tracking-widest mb-2 block ml-1">ডেলিভারি ঠিকানা (Address)</label>
+                  <textarea 
+                    rows={4}
+                    className="w-full border-2 border-slate-100 rounded-2xl p-4 font-black text-xs sm:text-sm bg-slate-50 outline-none focus:bg-white focus:ring-4 focus:ring-primary/5 transition-all resize-none" 
+                    value={editAddress} 
+                    onChange={e => setEditAddress(e.target.value)} 
+                    placeholder="আপনার সম্পূর্ণ ঠিকানা লিখুন (যেমন: বাসা নং, রোড নং, এলাকা, জেলা)" 
+                  />
+                </div>
+
+                <button 
+                  type="submit" 
+                  className="w-full bg-primary text-white py-4.5 rounded-2xl sm:rounded-3xl font-black shadow-xl shadow-primary/20 flex items-center justify-center gap-3 uppercase tracking-widest text-[10px] sm:text-xs transition-all hover:scale-[1.02] active:scale-[0.98] mt-4"
+                >
+                  তথ্য সংরক্ষণ করুন
+                </button>
+              </form>
             </motion.div>
           )}
         </AnimatePresence>

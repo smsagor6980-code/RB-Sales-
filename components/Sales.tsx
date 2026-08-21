@@ -2,13 +2,14 @@ import React, { useState, useMemo, useEffect } from 'react';
 import { Product, Customer, Sale, CartItem, Staff, ProductReturn } from '../types';
 import html2pdf from 'html2pdf.js';
 import InvoiceContent from './InvoiceContent';
+import DeliverySplitModal from './DeliverySplitModal';
 import { 
   Plus, Trash2, ShoppingCart, 
   X, Printer, DollarSign, Search, User, Minus, Check, LayoutGrid,
   CreditCard, Tag, AlertCircle, ArrowRight, RotateCcw, SearchIcon,
   UserCheck, History, ArrowLeft, FileText, MapPin, Phone, 
   Share2, Download, CheckCircle2, AlertTriangle, Building2, Clock, MessageCircle,
-  Calendar, Package
+  Calendar, Package, Truck
 } from 'lucide-react';
 
 interface SalesProps {
@@ -17,13 +18,14 @@ interface SalesProps {
   sales: Sale[];
   onSaleComplete: (sale: Sale, products: Product[], customers: Customer[]) => void;
   onAddReturn: (ret: ProductReturn) => void;
+  onSplitDelivery?: (deliveredSale: Sale, newUndeliveredSale: Sale | null, updatedProducts: Product[], updatedCustomers: Customer[]) => void;
   staff: Staff[];
   isAdmin?: boolean;
   currentStaff?: Staff | null;
   shopSettings: any;
 }
 
-const Sales: React.FC<SalesProps> = ({ products, customers, sales, onSaleComplete, onAddReturn, staff, isAdmin, currentStaff, shopSettings }) => {
+const Sales: React.FC<SalesProps> = ({ products, customers, sales, onSaleComplete, onAddReturn, onSplitDelivery, staff, isAdmin, currentStaff, shopSettings }) => {
   const [cart, setCart] = useState<CartItem[]>([]);
   const [selectedCustomerId, setSelectedCustomerId] = useState<string>('');
   const [customerSearch, setCustomerSearch] = useState('');
@@ -34,6 +36,8 @@ const Sales: React.FC<SalesProps> = ({ products, customers, sales, onSaleComplet
   const [showReceipt, setShowReceipt] = useState(false);
   const [lastSale, setLastSale] = useState<Sale | null>(null);
   const [paymentMethod, setPaymentMethod] = useState('Cash');
+  const [showDeliverySplitModal, setShowDeliverySplitModal] = useState(false);
+  const [deliveryTargetSale, setDeliveryTargetSale] = useState<Sale | null>(null);
   
   const [showReturnModal, setShowReturnModal] = useState(false);
   const [returnSearch, setReturnSearch] = useState('');
@@ -43,6 +47,8 @@ const Sales: React.FC<SalesProps> = ({ products, customers, sales, onSaleComplet
   const [returnQtys, setReturnQtys] = useState<Record<string, number>>({});
   
   const [mobileView, setMobileView] = useState<'products' | 'cart'>('products');
+  const [tempQtys, setTempQtys] = useState<Record<string, string>>({});
+  const [tempReturnQtys, setTempReturnQtys] = useState<Record<string, string>>({});
 
   // Unified Filtered Customers with Permissions: Only show customers added by this user if not admin
   const displayCustomersForSelection = useMemo(() => {
@@ -208,33 +214,18 @@ const Sales: React.FC<SalesProps> = ({ products, customers, sales, onSaleComplet
     // Create a unique ID for the print window
     const WinPrint = window.open('', `print_${Date.now()}`, 'width=900,height=800');
     if (WinPrint) {
+      const styles = Array.from(document.querySelectorAll('style, link[rel="stylesheet"]'))
+        .map(el => el.outerHTML)
+        .join('\n');
       WinPrint.document.write('<html><head><title>Invoice</title>');
+      WinPrint.document.write(styles);
       WinPrint.document.write('<style>');
       WinPrint.document.write(`
-        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800;900&display=swap');
-        body { font-family: 'Inter', sans-serif; padding: 40px; color: #1e293b; background: white; margin: 0; }
-        .invoice-container { max-width: 800px; margin: 0 auto; }
-        .invoice-header { display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 4px solid #1e1e5f; padding-bottom: 24px; margin-bottom: 40px; }
-        .shop-brand h1 { margin: 0; font-size: 36px; font-weight: 900; color: #1e1e5f; letter-spacing: -1.5px; text-transform: uppercase; }
-        .shop-brand p { margin: 4px 0; font-size: 13px; font-weight: 600; color: #64748b; }
-        .invoice-meta { text-align: right; }
-        .invoice-meta h2 { margin: 0; font-size: 32px; font-weight: 900; color: #1e1e5f; text-transform: uppercase; }
-        .invoice-meta p { margin: 4px 0; font-size: 14px; font-weight: 700; }
-        table { width: 100%; border-collapse: collapse; margin-bottom: 40px; border-radius: 12px; overflow: hidden; }
-        th { background: #1e1e5f; color: white; text-align: left; padding: 14px 20px; font-size: 12px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.5px; }
-        td { padding: 16px 20px; border-bottom: 1px solid #f1f5f9; font-size: 14px; font-weight: 600; color: #334155; }
-        .text-right { text-align: right; }
-        .summary-wrapper { display: flex; justify-content: flex-end; padding-top: 10px; }
-        .summary-table { width: 300px; }
-        .summary-row { display: flex; justify-content: space-between; padding: 10px 0; font-size: 14px; font-weight: 700; border-bottom: 1px solid #f1f5f9; }
-        .summary-row.total-bill { border-bottom: none; border-top: 3px solid #1e1e5f; margin-top: 12px; padding-top: 20px; font-size: 22px; font-weight: 900; color: #1e1e5f; }
-        .footer { margin-top: 100px; display: flex; justify-content: space-between; align-items: flex-end; }
-        .signature-box { text-align: center; width: 220px; }
-        .signature-line { border-top: 2px solid #1e1e5f; margin-bottom: 8px; }
-        .signature-box span { font-size: 12px; font-weight: 900; text-transform: uppercase; color: #1e1e5f; }
-        @media print { body { padding: 20px; } }
+        @media print {
+          body { -webkit-print-color-adjust: exact; print-color-adjust: exact; background-color: #ffffff !important; }
+        }
       `);
-      WinPrint.document.write('</style></head><body>');
+      WinPrint.document.write('</style></head><body style="background: white; padding: 20px;">');
       WinPrint.document.write('<div class="invoice-container">');
       WinPrint.document.write(printContent.innerHTML);
       WinPrint.document.write('</div>');
@@ -444,9 +435,66 @@ const Sales: React.FC<SalesProps> = ({ products, customers, sales, onSaleComplet
                       </div>
                     </div>
                     <div className="flex items-center gap-2 bg-slate-100 p-1.5 rounded-2xl">
-                       <button onClick={() => updateQty(item.id, item.quantity - 1)} className="p-1.5 rounded-xl bg-white shadow-sm text-slate-600 active-scale-90 transition-all"><Minus size={14}/></button>
-                       <span className="text-xs font-black min-w-[24px] text-center">{item.quantity}</span>
-                       <button onClick={() => updateQty(item.id, item.quantity + 1)} className="p-1.5 rounded-xl bg-white shadow-sm text-slate-600 active-scale-90 transition-all"><Plus size={14}/></button>
+                       <button 
+                         onClick={() => {
+                           const newQty = item.quantity - 1;
+                           updateQty(item.id, newQty);
+                           setTempQtys(prev => {
+                             const next = { ...prev };
+                             delete next[item.id];
+                             return next;
+                           });
+                         }} 
+                         className="p-1.5 rounded-xl bg-white shadow-sm text-slate-600 active-scale-90 transition-all"
+                       >
+                         <Minus size={14}/>
+                       </button>
+                       <input 
+                         type="number"
+                         min="1"
+                         max={products.find(p => p.id === item.productId)?.stock || 9999}
+                         className="text-xs font-black w-10 text-center bg-transparent border-none p-0 focus:outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                         value={tempQtys[item.id] !== undefined ? tempQtys[item.id] : item.quantity}
+                         onChange={(e) => {
+                           const valStr = e.target.value;
+                           setTempQtys(prev => ({ ...prev, [item.id]: valStr }));
+                           const val = parseInt(valStr, 10);
+                           if (!isNaN(val) && val > 0) {
+                             const maxStock = products.find(p => p.id === item.productId)?.stock || 9999;
+                             const finalQty = Math.min(val, maxStock);
+                             setCart(prevCart => prevCart.map(i => {
+                               if (i.id === item.id) {
+                                 return { ...i, quantity: finalQty, total: Math.round(finalQty * i.unitPrice) };
+                               }
+                               return i;
+                             }));
+                           }
+                         }}
+                         onBlur={() => {
+                           setTempQtys(prev => {
+                             const next = { ...prev };
+                             delete next[item.id];
+                             return next;
+                           });
+                           if (item.quantity < 1) {
+                             updateQty(item.id, 1);
+                           }
+                         }}
+                       />
+                       <button 
+                         onClick={() => {
+                           const newQty = item.quantity + 1;
+                           updateQty(item.id, newQty);
+                           setTempQtys(prev => {
+                             const next = { ...prev };
+                             delete next[item.id];
+                             return next;
+                           });
+                         }} 
+                         className="p-1.5 rounded-xl bg-white shadow-sm text-slate-600 active-scale-90 transition-all"
+                       >
+                         <Plus size={14}/>
+                       </button>
                     </div>
                     <div className="text-right min-w-[70px]">
                        <div className={`text-[12px] font-black tracking-tighter ${item.priceType === 'wholesale' ? 'text-emerald-700' : item.priceType === 'distributor' ? 'text-amber-700' : 'text-blue-700'}`}>৳{item.total}</div>
@@ -464,9 +512,18 @@ const Sales: React.FC<SalesProps> = ({ products, customers, sales, onSaleComplet
                     <input type="number" className="w-24 text-right bg-white border-2 border-rose-100 rounded-xl outline-none p-2 focus:ring-4 focus:ring-primary/5" value={discountInput} onChange={e => setDiscountInput(e.target.value)} />
                  </div>
                  <div className="grid grid-cols-4 gap-2 mt-2">
-                    {['Cash', 'bKash', 'Nagad', 'Bank'].map(m => (
-                       <button key={m} onClick={() => setPaymentMethod(m)} className={`py-2 rounded-xl text-[9px] font-black uppercase tracking-tighter border-2 transition-all ${paymentMethod === m ? 'bg-primary text-white border-primary shadow-lg' : 'bg-white text-slate-400 border-slate-100'}`}>
-                          {m}
+                    {[
+                      { id: 'Cash', label: 'Cash', activeClass: 'bg-emerald-600 text-white border-emerald-600 shadow-md shadow-emerald-600/30' },
+                      { id: 'bKash', label: 'bKash', activeClass: 'bg-[#e2136e] text-white border-[#e2136e] shadow-md shadow-pink-600/30' },
+                      { id: 'Nagad', label: 'Nagad', activeClass: 'bg-[#f7941d] text-white border-[#f7941d] shadow-md shadow-orange-600/30' },
+                      { id: 'Bank', label: 'Bank', activeClass: 'bg-blue-600 text-white border-blue-600 shadow-md shadow-blue-600/30' }
+                    ].map(m => (
+                       <button 
+                         key={m.id} 
+                         onClick={() => setPaymentMethod(m.id)} 
+                         className={`py-2.5 rounded-xl text-[10px] font-black uppercase tracking-tighter border-2 transition-all active:scale-95 ${paymentMethod === m.id ? m.activeClass : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'}`}
+                       >
+                          {m.label}
                        </button>
                     ))}
                  </div>
@@ -514,13 +571,48 @@ const Sales: React.FC<SalesProps> = ({ products, customers, sales, onSaleComplet
                    shopSettings={shopSettings} 
                  />
               </div>
-              <div className="p-6 bg-white border-t-2 border-slate-200 flex flex-wrap justify-end gap-3 shrink-0">
-                 <button onClick={() => setShowReceipt(false)} className="bg-slate-100 text-slate-600 px-8 py-4 rounded-2xl font-black text-xs uppercase tracking-widest active-scale">Close Preview</button>
-                 <button onClick={handleDownloadInvoice} className="bg-emerald-50 text-emerald-600 px-10 py-4 rounded-2xl font-black text-xs uppercase tracking-widest shadow-sm flex items-center gap-3 transition-all active-scale border-2 border-emerald-100"><Download size={18}/> Download PDF</button>
-                 <button onClick={handlePrint} className="bg-primary text-white px-10 py-4 rounded-2xl font-black text-xs uppercase tracking-widest shadow-2xl flex items-center gap-3 transition-all active-scale"><Printer size={18}/> Print Invoice</button>
+              <div className="p-6 bg-white border-t-2 border-slate-200 flex flex-wrap justify-between items-center gap-3 shrink-0">
+                 <div className="flex items-center gap-2">
+                    <button 
+                      onClick={() => {
+                        setDeliveryTargetSale(lastSale);
+                        setShowDeliverySplitModal(true);
+                      }} 
+                      className="bg-primary/10 text-primary hover:bg-primary/20 border-2 border-primary/20 px-6 py-4 rounded-2xl font-black text-xs uppercase tracking-wider flex items-center gap-2.5 transition-all active:scale-95"
+                    >
+                      <Truck size={18}/> 📦 ডেলিভারি ও অনডেলিভারী চালান (Delivery / Challan)
+                    </button>
+                 </div>
+                 <div className="flex flex-wrap justify-end gap-3">
+                    <button onClick={() => setShowReceipt(false)} className="bg-slate-100 text-slate-600 px-8 py-4 rounded-2xl font-black text-xs uppercase tracking-widest active-scale">Close Preview</button>
+                    <button onClick={handleDownloadInvoice} className="bg-emerald-50 text-emerald-600 px-8 py-4 rounded-2xl font-black text-xs uppercase tracking-widest shadow-sm flex items-center gap-3 transition-all active-scale border-2 border-emerald-100"><Download size={18}/> Download PDF</button>
+                    <button onClick={handlePrint} className="bg-primary text-white px-8 py-4 rounded-2xl font-black text-xs uppercase tracking-widest shadow-2xl flex items-center gap-3 transition-all active-scale"><Printer size={18}/> Print Invoice</button>
+                 </div>
               </div>
            </div>
         </div>
+      )}
+
+      {/* Delivery and Undelivery Split Modal */}
+      {showDeliverySplitModal && deliveryTargetSale && (
+        <DeliverySplitModal
+          isOpen={showDeliverySplitModal}
+          onClose={() => {
+            setShowDeliverySplitModal(false);
+            setDeliveryTargetSale(null);
+          }}
+          sale={deliveryTargetSale}
+          products={products}
+          customers={customers}
+          shopSettings={shopSettings}
+          currentStaff={currentStaff}
+          onConfirmSplitDelivery={(deliveredSale, newUndeliveredSale, updatedProducts, updatedCustomers) => {
+            if (onSplitDelivery) {
+              onSplitDelivery(deliveredSale, newUndeliveredSale, updatedProducts, updatedCustomers);
+            }
+            setLastSale(deliveredSale);
+          }}
+        />
       )}
 
       {showReturnModal && (
@@ -600,9 +692,57 @@ const Sales: React.FC<SalesProps> = ({ products, customers, sales, onSaleComplet
                                          <div className="text-[10px] font-bold text-slate-400 uppercase">Original Qty: {item.quantity} • Paid: ৳{item.total}</div>
                                       </div>
                                       <div className="flex items-center gap-3 bg-white p-1.5 rounded-2xl border border-slate-200">
-                                         <button onClick={() => setReturnQtys(prev => ({ ...prev, [item.productId]: Math.max(0, (prev[item.productId] || 0) - 1) }))} className="p-1.5 text-slate-400 hover:text-rose-500 transition-all"><Minus size={14}/></button>
-                                         <span className="text-xs font-black min-w-[20px] text-center">{returnQtys[item.productId] || 0}</span>
-                                         <button onClick={() => setReturnQtys(prev => ({ ...prev, [item.productId]: Math.min(item.quantity, (prev[item.productId] || 0) + 1) }))} className="p-1.5 text-slate-400 hover:text-emerald-500 transition-all"><Plus size={14}/></button>
+                                         <button 
+                                           onClick={() => {
+                                             const newQty = Math.max(0, (returnQtys[item.productId] || 0) - 1);
+                                             setReturnQtys(prev => ({ ...prev, [item.productId]: newQty }));
+                                             setTempReturnQtys(prev => {
+                                               const next = { ...prev };
+                                               delete next[item.productId];
+                                               return next;
+                                             });
+                                           }} 
+                                           className="p-1.5 text-slate-400 hover:text-rose-500 transition-all"
+                                         >
+                                           <Minus size={14}/>
+                                         </button>
+                                         <input 
+                                           type="number"
+                                           min="0"
+                                           max={item.quantity}
+                                           className="text-xs font-black w-10 text-center bg-transparent border-none p-0 focus:outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                                           value={tempReturnQtys[item.productId] !== undefined ? tempReturnQtys[item.productId] : (returnQtys[item.productId] || 0)}
+                                           onChange={(e) => {
+                                             const valStr = e.target.value;
+                                             setTempReturnQtys(prev => ({ ...prev, [item.productId]: valStr }));
+                                             const val = parseInt(valStr, 10);
+                                             if (!isNaN(val) && val >= 0) {
+                                               const finalQty = Math.min(val, item.quantity);
+                                               setReturnQtys(prev => ({ ...prev, [item.productId]: finalQty }));
+                                             }
+                                           }}
+                                           onBlur={() => {
+                                             setTempReturnQtys(prev => {
+                                               const next = { ...prev };
+                                               delete next[item.productId];
+                                               return next;
+                                             });
+                                           }}
+                                         />
+                                         <button 
+                                           onClick={() => {
+                                             const newQty = Math.min(item.quantity, (returnQtys[item.productId] || 0) + 1);
+                                             setReturnQtys(prev => ({ ...prev, [item.productId]: newQty }));
+                                             setTempReturnQtys(prev => {
+                                               const next = { ...prev };
+                                               delete next[item.productId];
+                                               return next;
+                                             });
+                                           }} 
+                                           className="p-1.5 text-slate-400 hover:text-emerald-500 transition-all"
+                                         >
+                                           <Plus size={14}/>
+                                         </button>
                                       </div>
                                    </div>
                                  ))}

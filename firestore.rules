@@ -64,7 +64,8 @@ service cloud.firestore {
     function isApprovedStaff() {
       return isStaff() && (
         isOwnerEmail() ||
-        get(/databases/$(database)/documents/staff/$(request.auth.uid)).data.isApproved == true
+        (exists(/databases/$(database)/documents/staff/$(request.auth.uid)) && 
+         get(/databases/$(database)/documents/staff/$(request.auth.uid)).data.isApproved == true)
       );
     }
 
@@ -73,21 +74,21 @@ service cloud.firestore {
     }
 
     function isValidProduct(data) {
-      return data.keys().hasAll(['id', 'name', 'purchasePrice', 'salePrice', 'category', 'stock', 'unit']) &&
+      return data.keys().hasAll(['id', 'name', 'purchasePrice', 'salePrice', 'category', 'stock']) &&
              isValidId(data.id) &&
              data.name is string && data.name.size() <= 256 &&
              data.purchasePrice is number &&
              data.salePrice is number &&
              data.category is string &&
              data.stock is number &&
-             data.unit is string &&
-             (data.get('imageUrl', null) == null || (data.imageUrl is string && data.imageUrl.size() <= 2000)) &&
+             (data.get('unit', null) == null || data.unit is string) &&
+             (data.get('imageUrl', null) == null || (data.imageUrl is string && data.imageUrl.size() <= 1048576)) &&
              (data.get('sku', null) == null || (data.sku is string && data.sku.size() <= 128));
     }
 
     function isValidStockEntry(data) {
       return data.keys().hasAll(['id', 'productId', 'productName', 'quantity', 'date']) &&
-             data.keys().size() >= 5 && data.keys().size() <= 7 &&
+             data.keys().size() >= 5 && data.keys().size() <= 12 &&
              isValidId(data.id) &&
              isValidId(data.productId) &&
              data.productName is string && data.productName.size() <= 256 &&
@@ -136,9 +137,10 @@ service cloud.firestore {
     match /staff/{staffId} {
       // Staff can read their own profile
       // Admins can read/write all staff
-      allow read: if isOwner(staffId) || isApprovedStaff();
+      allow read: if isOwner(staffId) || isApprovedStaff() || (isAuthenticated() && resource.data.email == request.auth.token.email);
       allow create: if isAuthenticated(); // Allow registration
-      allow update, delete: if isAdmin() || (isOwner(staffId) && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['isApproved', 'designation', 'roleId']));
+      allow update: if isAdmin() || (isOwner(staffId) && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['isApproved', 'designation', 'roleId']));
+      allow delete: if isAdmin() || (isAuthenticated() && resource.data.email == request.auth.token.email);
     }
 
     match /sales/{saleId} {
@@ -180,20 +182,13 @@ service cloud.firestore {
     }
 
     match /attendances/{attendanceId} {
-      allow read: if isApprovedStaff();
-      // Allow users to check themselves in/out
-      allow create: if isApprovedStaff() && request.resource.data.staffId == request.auth.uid;
-      allow update: if isAdmin() || (isApprovedStaff() && resource.data.staffId == request.auth.uid);
-      allow delete: if isAdmin();
+      allow read: if isApprovedStaff() || isAdmin();
+      allow write: if isApprovedStaff() || isAdmin();
     }
 
     match /leaves/{leaveId} {
-      allow read: if isApprovedStaff();
-      // Staff can apply for their own leave
-      allow create: if isApprovedStaff() && request.resource.data.staffId == request.auth.uid;
-      // Admins can approve/reject, Users can update their own PENDING requests (e.g. change reason)
-      allow update: if isAdmin() || (isApprovedStaff() && resource.data.staffId == request.auth.uid && resource.data.status == 'Pending');
-      allow delete: if isAdmin();
+      allow read: if isApprovedStaff() || isAdmin();
+      allow write: if isApprovedStaff() || isAdmin();
     }
 
     match /payrolls/{payrollId} {
@@ -206,9 +201,18 @@ service cloud.firestore {
       allow write: if isApprovedStaff();
     }
 
+    match /customer_loans/{loanId} {
+      allow read: if isApprovedStaff() || (isAuthenticated() && resource.data.customerId == request.auth.uid);
+      allow write: if isApprovedStaff();
+    }
+
     match /reimbursements/{reimbursementId} {
       allow read: if isApprovedStaff();
       allow write: if isApprovedStaff();
+    }
+
+    match /production_batches/{batchId} {
+      allow read, write: if isApprovedStaff();
     }
     
     match /settings/{settingId} {
@@ -219,18 +223,6 @@ service cloud.firestore {
     match /ranks/{rankId} {
       allow read: if true;
       allow write: if isAdmin();
-    }
-
-    match /customer_loans/{loanId} {
-      allow read, write: if isApprovedStaff();
-    }
-
-    match /production_batches/{batchId} {
-      allow read, write: if isApprovedStaff();
-    }
-
-    match /supplier_returns/{returnId} {
-      allow read, write: if isApprovedStaff();
     }
 
     match /stock_entries/{entryId} {

@@ -28,6 +28,17 @@ const CheckoutModal: React.FC<CheckoutModalProps> = ({
     notes: ''
   });
 
+  React.useEffect(() => {
+    if (customer) {
+      setFormData(prev => ({
+        ...prev,
+        name: prev.name || customer.name || '',
+        phone: prev.phone || customer.phone || '',
+        address: prev.address || customer.address || '',
+      }));
+    }
+  }, [customer]);
+
   const subtotal = items.reduce((sum, item) => sum + item.total, 0);
   const deliveryFee = 60;
   const total = subtotal + deliveryFee;
@@ -73,133 +84,119 @@ const CheckoutModal: React.FC<CheckoutModalProps> = ({
           >
             {/* Left Side - Form */}
             <div className="flex-1 p-8 md:p-12 overflow-y-auto custom-scrollbar">
-              {step !== 'success' && (
-                <div className="flex items-center gap-4 mb-10">
-                  <div className={`w-10 h-10 rounded-2xl flex items-center justify-center font-black text-sm transition-all ${step === 'shipping' ? 'bg-primary text-white shadow-lg shadow-primary/20' : 'bg-emerald-50 text-emerald-500'}`}>
-                    {step === 'shipping' ? '1' : <CheckCircle2 size={20} />}
+              {step !== 'success' ? (
+                <div className="space-y-8 animate-in fade-in duration-300">
+                  <div>
+                    <h2 className="font-black text-2xl text-slate-800 tracking-tight flex items-center gap-2">
+                      <Package className="text-primary" size={24} /> চেকআউট সম্পন্ন করুন
+                    </h2>
+                    <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-1">সহজ ও দ্রুত অর্ডারিং ইন্টারফেস</p>
                   </div>
-                  <div className="h-[2px] w-8 bg-slate-100"></div>
-                  <div className={`w-10 h-10 rounded-2xl flex items-center justify-center font-black text-sm transition-all ${step === 'payment' ? 'bg-primary text-white shadow-lg shadow-primary/20' : 'bg-slate-100 text-slate-400'}`}>
-                    2
-                  </div>
-                  <h2 className="ml-4 font-black text-xl text-slate-800 uppercase tracking-tight">
-                    {step === 'shipping' ? 'ডেলিভারি ঠিকানা' : 'পেমেন্ট পদ্ধতি'}
-                  </h2>
-                </div>
-              )}
 
-              {step === 'shipping' && (
-                <div className="space-y-6 animate-in fade-in slide-in-from-right-4 duration-300">
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  {/* Delivery Address Section */}
+                  <div className="space-y-4">
+                    <h3 className="text-[11px] font-black text-slate-900 uppercase tracking-widest border-b pb-2 flex items-center gap-2">
+                      <MapPin size={14} className="text-primary" /> ১. ডেলিভারি তথ্য
+                    </h3>
+                    
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <div className="space-y-2">
+                        <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">আপনার নাম (Full Name)</label>
+                        <div className="relative">
+                          <User className="absolute left-4 top-4 text-slate-300" size={18} />
+                          <input 
+                            type="text" 
+                            className="w-full border-2 border-slate-100 rounded-2xl pl-12 pr-4 py-4 text-sm font-bold bg-slate-50 outline-none focus:border-primary/20 focus:bg-white transition-all"
+                            placeholder="যেমন: আসিফ রহমান"
+                            value={formData.name}
+                            onChange={e => setFormData({...formData, name: e.target.value})}
+                          />
+                        </div>
+                      </div>
+                      <div className="space-y-2">
+                        <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">ফোন নম্বর (Phone Number)</label>
+                        <div className="relative">
+                          <Phone className="absolute left-4 top-4 text-slate-300" size={18} />
+                          <input 
+                            type="tel" 
+                            className="w-full border-2 border-slate-100 rounded-2xl pl-12 pr-4 py-4 text-sm font-bold bg-slate-50 outline-none focus:border-primary/20 focus:bg-white transition-all"
+                            placeholder="যেমন: ০১৭XXXXXXXX"
+                            value={formData.phone}
+                            onChange={e => setFormData({...formData, phone: e.target.value})}
+                          />
+                        </div>
+                      </div>
+                    </div>
+
                     <div className="space-y-2">
-                      <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-2">আপনার নাম</label>
+                      <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">ডেলিভারি ঠিকানা (Detailed Address)</label>
                       <div className="relative">
-                        <User className="absolute left-4 top-4 text-slate-300" size={18} />
-                        <input 
-                          type="text" 
-                          className="w-full border-2 border-slate-50 rounded-2xl pl-12 pr-4 py-4 text-sm font-bold bg-slate-50 outline-none focus:border-primary/20 focus:bg-white transition-all"
-                          placeholder="নাম লিখুন"
-                          value={formData.name}
-                          onChange={e => setFormData({...formData, name: e.target.value})}
+                        <MapPin className="absolute left-4 top-4 text-slate-300" size={18} />
+                        <textarea 
+                          rows={2}
+                          className="w-full border-2 border-slate-100 rounded-2xl pl-12 pr-4 py-4 text-sm font-bold bg-slate-50 outline-none focus:border-primary/20 focus:bg-white transition-all resize-none"
+                          placeholder="আপনার বিস্তারিত ঠিকানা লিখুন (যেমন: বাসা নং, রোড, এলাকা)"
+                          value={formData.address}
+                          onChange={e => setFormData({...formData, address: e.target.value})}
                         />
                       </div>
                     </div>
-                    <div className="space-y-2">
-                      <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-2">ফোন নম্বর</label>
-                      <div className="relative">
-                        <Phone className="absolute left-4 top-4 text-slate-300" size={18} />
-                        <input 
-                          type="tel" 
-                          className="w-full border-2 border-slate-50 rounded-2xl pl-12 pr-4 py-4 text-sm font-bold bg-slate-50 outline-none focus:border-primary/20 focus:bg-white transition-all"
-                          placeholder="ফোন নম্বর লিখুন"
-                          value={formData.phone}
-                          onChange={e => setFormData({...formData, phone: e.target.value})}
-                        />
-                      </div>
-                    </div>
-                  </div>
 
-                  <div className="space-y-2">
-                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-2">ডেলিভারি ঠিকানা</label>
-                    <div className="relative">
-                      <MapPin className="absolute left-4 top-4 text-slate-300" size={18} />
-                      <textarea 
-                        rows={3}
-                        className="w-full border-2 border-slate-50 rounded-2xl pl-12 pr-4 py-4 text-sm font-bold bg-slate-50 outline-none focus:border-primary/20 focus:bg-white transition-all resize-none"
-                        placeholder="আপনার পূর্ণ ঠিকানা লিখুন (বাসা নং, রোড, এলাকা)"
-                        value={formData.address}
-                        onChange={e => setFormData({...formData, address: e.target.value})}
+                    <div className="space-y-2">
+                      <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">অর্ডার নোট / নির্দেশনা (ঐচ্ছিক)</label>
+                      <input 
+                        type="text" 
+                        className="w-full border-2 border-slate-100 rounded-2xl px-4 py-3.5 text-sm font-bold bg-slate-50 outline-none focus:border-primary/20 focus:bg-white transition-all"
+                        placeholder="ডেলিভারি ম্যানের জন্য কোনো বিশেষ বার্তা থাকলে লিখুন"
+                        value={formData.notes}
+                        onChange={e => setFormData({...formData, notes: e.target.value})}
                       />
                     </div>
                   </div>
 
-                  <div className="space-y-2">
-                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-2">অর্ডার নোট (ঐচ্ছিক)</label>
-                    <input 
-                      type="text" 
-                      className="w-full border-2 border-slate-50 rounded-2xl px-4 py-4 text-sm font-bold bg-slate-50 outline-none focus:border-primary/20 focus:bg-white transition-all"
-                      placeholder="ডেলিভারি ম্যানের জন্য কোনো বিশেষ বার্তা থাকলে লিখুন"
-                      value={formData.notes}
-                      onChange={e => setFormData({...formData, notes: e.target.value})}
-                    />
+                  {/* Payment Method Section */}
+                  <div className="space-y-4 pt-4">
+                    <h3 className="text-[11px] font-black text-slate-900 uppercase tracking-widest border-b pb-2 flex items-center gap-2">
+                      <CreditCard size={14} className="text-primary" /> ২. পেমেন্ট পদ্ধতি
+                    </h3>
+                    
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                      {[
+                        { id: 'cash_on_delivery', name: 'ক্যাশ অন ডেলিভারি', icon: Truck, desc: 'হাতে পেয়ে পেমেন্ট' },
+                        { id: 'bkash', name: 'বিকাশ / নগদ', icon: Wallet, desc: 'মোবাইল ব্যাংকিং' },
+                        { id: 'card', name: 'কার্ড পেমেন্ট', icon: CreditCard, desc: 'ডেবিট/ক্রেডিট কার্ড' }
+                      ].map((method) => (
+                        <button
+                          key={method.id}
+                          type="button"
+                          onClick={() => setFormData({...formData, paymentMethod: method.id})}
+                          className={`flex flex-col items-center text-center p-4 rounded-2xl border-2 transition-all gap-2 cursor-pointer ${formData.paymentMethod === method.id ? 'border-primary bg-primary/5 shadow-md shadow-primary/5 scale-102' : 'border-slate-100 hover:border-slate-200 bg-slate-50/50'}`}
+                        >
+                          <div className={`w-10 h-10 rounded-xl flex items-center justify-center transition-colors ${formData.paymentMethod === method.id ? 'bg-primary text-white' : 'bg-slate-100 text-slate-400'}`}>
+                            <method.icon size={20} />
+                          </div>
+                          <div>
+                            <h4 className="font-black text-slate-800 text-[11px]">{method.name}</h4>
+                            <p className="text-slate-400 text-[8px] font-bold mt-0.5 uppercase tracking-tighter">{method.desc}</p>
+                          </div>
+                        </button>
+                      ))}
+                    </div>
                   </div>
 
-                  <button 
-                    onClick={() => setStep('payment')}
-                    disabled={!formData.name || !formData.phone || !formData.address}
-                    className="w-full bg-primary text-white py-5 rounded-2xl font-black uppercase text-xs shadow-2xl shadow-primary/20 flex justify-center items-center gap-3 hover:scale-[1.02] active:scale-[0.98] transition-all disabled:bg-slate-200 disabled:shadow-none"
-                  >
-                    পেমেন্ট ধাপে যান <ArrowRight size={18} />
-                  </button>
-                </div>
-              )}
-
-              {step === 'payment' && (
-                <div className="space-y-6 animate-in fade-in slide-in-from-right-4 duration-300">
-                  <div className="grid grid-cols-1 gap-4">
-                    {[
-                      { id: 'cash_on_delivery', name: 'ক্যাশ অন ডেলিভারি', icon: Truck, desc: 'পণ্য হাতে পেয়ে টাকা পরিশোধ করুন' },
-                      { id: 'bkash', name: 'বিকাশ / নগদ', icon: Wallet, desc: 'মোবাইল ব্যাংকিং এর মাধ্যমে পেমেন্ট' },
-                      { id: 'card', name: 'ডেবিট / ক্রেডিট কার্ড', icon: CreditCard, desc: 'ভিসা, মাস্টারকার্ড বা অন্যান্য কার্ড' }
-                    ].map((method) => (
-                      <button
-                        key={method.id}
-                        onClick={() => setFormData({...formData, paymentMethod: method.id})}
-                        className={`flex items-center gap-6 p-6 rounded-3xl border-2 transition-all text-left ${formData.paymentMethod === method.id ? 'border-primary bg-primary/5 shadow-lg shadow-primary/5' : 'border-slate-100 hover:border-slate-200'}`}
-                      >
-                        <div className={`w-14 h-14 rounded-2xl flex items-center justify-center transition-colors ${formData.paymentMethod === method.id ? 'bg-primary text-white' : 'bg-slate-100 text-slate-400'}`}>
-                          <method.icon size={28} />
-                        </div>
-                        <div className="flex-1">
-                          <h4 className="font-black text-slate-800 text-sm">{method.name}</h4>
-                          <p className="text-slate-400 text-xs font-bold mt-1 uppercase tracking-widest">{method.desc}</p>
-                        </div>
-                        <div className={`w-6 h-6 rounded-full border-2 flex items-center justify-center transition-all ${formData.paymentMethod === method.id ? 'border-primary bg-primary' : 'border-slate-200'}`}>
-                          {formData.paymentMethod === method.id && <div className="w-2 h-2 bg-white rounded-full" />}
-                        </div>
-                      </button>
-                    ))}
-                  </div>
-
-                  <div className="flex gap-4">
+                  {/* Mobile Order Button */}
+                  <div className="block md:hidden pt-4 border-t border-slate-50">
                     <button 
-                      onClick={() => setStep('shipping')}
-                      className="flex-1 bg-slate-100 text-slate-600 py-5 rounded-2xl font-black uppercase text-xs hover:bg-slate-200 transition-all"
-                    >
-                      পিছনে যান
-                    </button>
-                    <button 
+                      type="button"
                       onClick={handlePlaceOrder}
-                      disabled={loading}
-                      className="flex-[2] bg-primary text-white py-5 rounded-2xl font-black uppercase text-xs shadow-2xl shadow-primary/20 flex justify-center items-center gap-3 hover:scale-[1.02] active:scale-[0.98] transition-all"
+                      disabled={loading || !formData.name || !formData.phone || !formData.address}
+                      className="w-full bg-primary text-white py-4 rounded-2xl font-black uppercase text-xs shadow-xl shadow-primary/20 flex justify-center items-center gap-3 hover:scale-101 active:scale-98 transition-all disabled:bg-slate-200 disabled:shadow-none"
                     >
-                      {loading ? <Loader2 className="animate-spin" size={20} /> : 'অর্ডার কনফার্ম করুন'}
+                      {loading ? <Loader2 className="animate-spin" size={18} /> : 'অর্ডার কনফার্ম করুন'}
                     </button>
                   </div>
                 </div>
-              )}
-
-              {step === 'success' && (
+              ) : (
                 <div className="h-full flex flex-col items-center justify-center text-center p-8 animate-in zoom-in duration-500">
                   <div className="w-24 h-24 bg-emerald-50 text-emerald-500 rounded-full flex items-center justify-center mb-8 shadow-xl shadow-emerald-500/10">
                     <CheckCircle2 size={64} />
@@ -219,6 +216,7 @@ const CheckoutModal: React.FC<CheckoutModalProps> = ({
                     </div>
                   </div>
                   <button 
+                    type="button"
                     onClick={onClose}
                     className="mt-10 bg-primary text-white px-12 py-5 rounded-2xl font-black uppercase text-xs shadow-2xl shadow-primary/20 hover:scale-105 active:scale-95 transition-all"
                   >
@@ -230,50 +228,63 @@ const CheckoutModal: React.FC<CheckoutModalProps> = ({
 
             {/* Right Side - Summary (Desktop Only) */}
             {step !== 'success' && (
-              <div className="hidden md:block w-80 bg-slate-50 border-l border-slate-100 p-10">
-                <h3 className="font-black text-slate-800 uppercase tracking-widest text-xs mb-8">অর্ডার সামারি</h3>
-                
-                <div className="space-y-6 max-h-[40vh] overflow-y-auto custom-scrollbar pr-2 mb-8">
-                  {items.map((item) => (
-                    <div key={item.productId} className="flex gap-4">
-                      <div className="w-14 h-14 bg-white rounded-xl overflow-hidden flex-shrink-0 border border-slate-200">
-                        <img src={item.imageUrl} alt={item.productName} className="w-full h-full object-cover" />
+              <div className="hidden md:flex w-80 bg-slate-50 border-l border-slate-100 p-10 flex-col justify-between">
+                <div>
+                  <h3 className="font-black text-slate-800 uppercase tracking-widest text-xs mb-8 border-b pb-2">অর্ডার সামারি</h3>
+                  
+                  <div className="space-y-6 max-h-[35vh] overflow-y-auto custom-scrollbar pr-2 mb-8">
+                    {items.map((item) => (
+                      <div key={item.productId} className="flex gap-4">
+                        <div className="w-14 h-14 bg-white rounded-xl overflow-hidden flex-shrink-0 border border-slate-200">
+                          <img src={item.imageUrl} alt={item.productName} className="w-full h-full object-cover" />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <h4 className="font-black text-slate-800 text-xs truncate">{item.productName}</h4>
+                          <p className="text-[10px] font-bold text-slate-400 mt-1 uppercase tracking-widest">
+                            {item.quantity} x ৳{(item.unitPrice ?? 0).toLocaleString()}
+                          </p>
+                        </div>
                       </div>
-                      <div className="flex-1 min-w-0">
-                        <h4 className="font-black text-slate-800 text-xs truncate">{item.productName}</h4>
-                        <p className="text-[10px] font-bold text-slate-400 mt-1 uppercase tracking-widest">
-                          {item.quantity} x ৳{item.unitPrice.toLocaleString()}
-                        </p>
-                      </div>
+                    ))}
+                  </div>
+
+                  <div className="space-y-4 pt-6 border-t border-slate-200">
+                    <div className="flex justify-between text-xs font-bold text-slate-500">
+                      <span>সাব-টোটাল</span>
+                      <span>৳{(subtotal ?? 0).toLocaleString()}</span>
                     </div>
-                  ))}
-                </div>
-
-                <div className="space-y-4 pt-8 border-t border-slate-200">
-                  <div className="flex justify-between text-sm font-bold text-slate-500">
-                    <span>সাব-টোটাল</span>
-                    <span>৳{subtotal.toLocaleString()}</span>
-                  </div>
-                  <div className="flex justify-between text-sm font-bold text-slate-500">
-                    <span>ডেলিভারি চার্জ</span>
-                    <span>৳{deliveryFee.toLocaleString()}</span>
-                  </div>
-                  <div className="h-[1px] bg-slate-200 my-2"></div>
-                  <div className="flex justify-between items-center">
-                    <span className="font-black text-slate-800 uppercase tracking-widest text-[10px]">সর্বমোট</span>
-                    <span className="font-black text-primary text-2xl tracking-tighter">
-                      ৳{total.toLocaleString()}
-                    </span>
+                    <div className="flex justify-between text-xs font-bold text-slate-500">
+                      <span>ডেলিভারি চার্জ</span>
+                      <span>৳{(deliveryFee ?? 0).toLocaleString()}</span>
+                    </div>
+                    <div className="h-[1px] bg-slate-200 my-2"></div>
+                    <div className="flex justify-between items-center">
+                      <span className="font-black text-slate-800 uppercase tracking-widest text-[10px]">সর্বমোট</span>
+                      <span className="font-black text-primary text-2xl tracking-tighter">
+                        ৳{(total ?? 0).toLocaleString()}
+                      </span>
+                    </div>
                   </div>
                 </div>
 
-                <div className="mt-10 p-4 bg-white rounded-2xl border border-slate-200 flex items-center gap-3">
-                  <div className="w-10 h-10 bg-emerald-50 text-emerald-500 rounded-xl flex items-center justify-center">
-                    <Package size={20} />
-                  </div>
-                  <div>
-                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">ডেলিভারি গ্যারান্টি</p>
-                    <p className="text-xs font-black text-slate-800">২৪ ঘণ্টার মধ্যে শিপিং</p>
+                <div className="space-y-4 pt-6">
+                  <button 
+                    type="button"
+                    onClick={handlePlaceOrder}
+                    disabled={loading || !formData.name || !formData.phone || !formData.address}
+                    className="w-full bg-primary text-white py-4 rounded-2xl font-black uppercase text-xs shadow-xl shadow-primary/20 flex justify-center items-center gap-3 hover:scale-[1.02] active:scale-[0.98] transition-all disabled:bg-slate-200 disabled:shadow-none"
+                  >
+                    {loading ? <Loader2 className="animate-spin" size={18} /> : 'অর্ডার কনফার্ম করুন'}
+                  </button>
+
+                  <div className="p-4 bg-white rounded-2xl border border-slate-200 flex items-center gap-3">
+                    <div className="w-10 h-10 bg-emerald-50 text-emerald-500 rounded-xl flex items-center justify-center">
+                      <Package size={20} />
+                    </div>
+                    <div>
+                      <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">ডেলিভারি গ্যারান্টি</p>
+                      <p className="text-[11px] font-black text-slate-800">২৪ ঘণ্টার মধ্যে শিপিং</p>
+                    </div>
                   </div>
                 </div>
               </div>

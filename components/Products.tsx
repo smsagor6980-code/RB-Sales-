@@ -1,15 +1,15 @@
-
 import React, { useState, useRef, useMemo } from 'react';
-import { Product, ProductCategory, Purchase, StockEntry, Staff } from '../types';
+import { Product, ProductCategory, Purchase, StockEntry, Staff, ProductionBatch, Supplier } from '../types';
 import { 
   Plus, Edit, Trash2, Search, X, Upload, 
   Loader2, Package, LayoutGrid, List as ListIcon,
   Tag, DollarSign, Info, AlertCircle, Save, Truck, Calendar, History, TrendingUp,
-  BarChart3, Clock, CheckCircle2, ChevronRight, Calculator, Minus, Sparkles
+  BarChart3, Clock, CheckCircle2, ChevronRight, Calculator, Minus, Sparkles,
+  Layers, Factory, ArrowRightLeft, ArrowUpRight, Check, AlertTriangle, ShieldCheck
 } from 'lucide-react';
 import { storage, auth } from '../services/firebase';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
-import { motion } from 'motion/react';
+import { motion, AnimatePresence } from 'framer-motion';
 
 interface ProductsProps {
   products: Product[];
@@ -21,16 +21,35 @@ interface ProductsProps {
   stockEntries: StockEntry[];
   onStockUpdate: (entry: StockEntry, updatedProducts: Product[]) => void;
   currentStaff: Staff | null;
+  suppliers?: Supplier[];
+  productionBatches?: ProductionBatch[];
+  onProductionBatchComplete?: (batch: ProductionBatch, updatedProducts: Product[], newEntries: StockEntry[]) => void;
+  onDeleteProductionBatch?: (id: string) => void;
 }
 
+type ProductTab = 'finished_goods' | 'raw_materials' | 'production_batches' | 'stock_history';
+
 const Products: React.FC<ProductsProps> = ({ 
-  products, onUpdate, onDelete, categories, onCategoryUpdate, 
-  purchases = [], stockEntries = [], onStockUpdate, currentStaff 
+  products = [], 
+  onUpdate, 
+  onDelete, 
+  categories = [], 
+  onCategoryUpdate, 
+  purchases = [], 
+  stockEntries = [], 
+  onStockUpdate, 
+  currentStaff,
+  suppliers = [],
+  productionBatches = [],
+  onProductionBatchComplete,
+  onDeleteProductionBatch
 }) => {
+  const [activeTab, setActiveTab] = useState<ProductTab>('finished_goods');
   const [showModal, setShowModal] = useState(false);
   const [showCategoryModal, setShowCategoryModal] = useState(false);
   const [showStockModal, setShowStockModal] = useState(false);
-  const [activeSubTab, setActiveSubTab] = useState<'inventory' | 'stock_history'>('inventory');
+  const [showBatchModal, setShowBatchModal] = useState(false);
+  const [activeCategoryToUploadId, setActiveCategoryToUploadId] = useState<string | null>(null);
   
   const [search, setSearch] = useState('');
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -40,6 +59,7 @@ const Products: React.FC<ProductsProps> = ({
   const [isUploading, setIsUploading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // Daily Stock Entry Form
   const [stockEntryForm, setStockEntryForm] = useState({
     productId: '',
     quantity: 0,
@@ -47,89 +67,240 @@ const Products: React.FC<ProductsProps> = ({
     note: ''
   });
 
+  // Product / Raw Material Add/Edit Form
   const [formData, setFormData] = useState<Partial<Product>>({
-    name: '', sku: '', purchasePrice: 0, salePrice: 0, wholesalePrice: 0, distributorPrice: 0, 
-    unit: 'pcs', stock: 0, minStock: 10, category: 'other', imageUrl: '', status: 'active',
+    name: '',
+    sku: '',
+    purchasePrice: 0,
+    salePrice: 0,
+    wholesalePrice: 0,
+    distributorPrice: 0,
+    unit: 'pcs',
+    stock: 0,
+    minStock: 10,
+    category: 'other',
+    imageUrl: '',
+    status: 'active',
+    productType: 'finished_good',
+    rawMaterialCategory: 'general',
+    supplierId: '',
+    supplierName: '',
     dateAdded: new Date().toISOString().split('T')[0]
   });
 
-  const productStockStats = useMemo(() => {
-    const now = new Date();
-    const today = now.toISOString().split('T')[0];
-    const month = today.slice(0, 7);
-    const year = today.slice(0, 4);
+  // Production Batch Form
+  const [batchForm, setBatchForm] = useState<{
+    producedProductId: string;
+    producedQuantity: number;
+    unit: string;
+    date: string;
+    laborCost: number;
+    otherCost: number;
+    notes: string;
+    rawMaterials: { rawMaterialId: string; quantity: number }[];
+  }>({
+    producedProductId: '',
+    producedQuantity: 1,
+    unit: 'pcs',
+    date: new Date().toISOString().split('T')[0],
+    laborCost: 0,
+    otherCost: 0,
+    notes: '',
+    rawMaterials: [{ rawMaterialId: '', quantity: 1 }]
+  });
 
-    const statsMap: Record<string, { today: number, month: number, year: number, lifetime: number, todayValue: number, monthValue: number, yearValue: number, lifetimeValue: number }> = {};
+  // Separate Finished Goods and Raw Materials
+  const finishedGoods = useMemo(() => {
+    return products.filter(p => p.productType !== 'raw_material');
+  }, [products]);
 
-    (stockEntries || []).forEach(e => {
-      const product = products.find(p => p.id === e.productId);
-      const purchasePrice = product?.purchasePrice || 0;
-      const value = e.quantity * purchasePrice;
+  const rawMaterials = useMemo(() => {
+    return products.filter(p => p.productType === 'raw_material');
+  }, [products]);
 
-      if (!statsMap[e.productId]) {
-        statsMap[e.productId] = { today: 0, month: 0, year: 0, lifetime: 0, todayValue: 0, monthValue: 0, yearValue: 0, lifetimeValue: 0 };
-      }
+  // General Inventory Stats
+  const inventoryStats = useMemo(() => {
+    const totalFinishedStock = finishedGoods.reduce((sum, p) => sum + (Number(p.stock) || 0), 0);
+    const finishedStockValue = finishedGoods.reduce((sum, p) => sum + ((Number(p.stock) || 0) * (Number(p.purchasePrice) || 0)), 0);
+    const finishedSalePotential = finishedGoods.reduce((sum, p) => sum + ((Number(p.stock) || 0) * (Number(p.salePrice) || 0)), 0);
 
-      statsMap[e.productId].lifetime += e.quantity;
-      statsMap[e.productId].lifetimeValue += value;
+    const totalRawStock = rawMaterials.reduce((sum, p) => sum + (Number(p.stock) || 0), 0);
+    const rawStockValue = rawMaterials.reduce((sum, p) => sum + ((Number(p.stock) || 0) * (Number(p.purchasePrice) || 0)), 0);
 
-      if (e.date === today) {
-        statsMap[e.productId].today += e.quantity;
-        statsMap[e.productId].todayValue += value;
-      }
-      if (e.date.startsWith(month)) {
-        statsMap[e.productId].month += e.quantity;
-        statsMap[e.productId].monthValue += value;
-      }
-      if (e.date.startsWith(year)) {
-        statsMap[e.productId].year += e.quantity;
-        statsMap[e.productId].yearValue += value;
-      }
-    });
-
-    return statsMap;
-  }, [stockEntries, products]);
-
-  const stockStats = useMemo(() => {
-    const today = new Date().toISOString().split('T')[0];
-    const month = today.slice(0, 7);
-    const year = today.slice(0, 4);
-
-    const stats = (stockEntries || []).reduce((acc, e) => {
-      const product = products.find(p => p.id === e.productId);
-      const purchasePrice = product?.purchasePrice || 0;
-      const value = e.quantity * purchasePrice;
-
-      acc.lifetime += e.quantity;
-      acc.lifetimeValue += value;
-
-      if (e.date === today) {
-        acc.today += e.quantity;
-        acc.todayValue += value;
-      }
-      if (e.date.startsWith(month)) {
-        acc.month += e.quantity;
-        acc.monthValue += value;
-      }
-      if (e.date.startsWith(year)) {
-        acc.year += e.quantity;
-        acc.yearValue += value;
-      }
-      return acc;
-    }, { 
-      today: 0, todayValue: 0, 
-      month: 0, monthValue: 0, 
-      year: 0, yearValue: 0, 
-      lifetime: 0, lifetimeValue: 0 
-    });
+    const lowStockCount = products.filter(p => (Number(p.stock) || 0) <= (Number(p.minStock) || 5)).length;
+    const totalBatches = productionBatches.length;
 
     return {
-      ...stats,
-      totalValue: products.reduce((sum, p) => sum + (p.stock * (p.purchasePrice || 0)), 0),
-      lowStockCount: products.filter(p => (p.stock || 0) <= (p.minStock || 10) && p.stock > 0).length,
-      outOfStockCount: products.filter(p => (p.stock || 0) <= 0).length
+      totalFinishedStock,
+      finishedStockValue,
+      finishedSalePotential,
+      totalRawStock,
+      rawStockValue,
+      lowStockCount,
+      totalBatches
     };
-  }, [stockEntries, products]);
+  }, [products, finishedGoods, rawMaterials, productionBatches]);
+
+  // Filtered Items based on active tab and search
+  const displayedItems = useMemo(() => {
+    const sourceList = activeTab === 'raw_materials' ? rawMaterials : finishedGoods;
+    return sourceList.filter(p => {
+      if (!p) return false;
+      const matchesSearch = (p.name || '').toLowerCase().includes(search.toLowerCase()) || 
+                           (p.sku || '').toLowerCase().includes(search.toLowerCase());
+      const matchesCategory = selectedCategory === 'all' || 
+                              (p.category || '').trim() === (selectedCategory || '').trim() ||
+                              (p.rawMaterialCategory || '').trim() === (selectedCategory || '').trim();
+      return matchesSearch && matchesCategory;
+    }).sort((a, b) => (b.dateAdded || '').localeCompare(a.dateAdded || ''));
+  }, [activeTab, rawMaterials, finishedGoods, search, selectedCategory]);
+
+  const resizeImage = (file: File, maxWidth = 300, maxHeight = 300): Promise<string> => {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.readAsDataURL(file);
+      reader.onload = (event) => {
+        const img = new Image();
+        img.src = event.target?.result as string;
+        img.onload = () => {
+          const canvas = document.createElement('canvas');
+          let width = img.width;
+          let height = img.height;
+
+          if (width > height) {
+            if (width > maxWidth) {
+              height = Math.round((height * maxWidth) / width);
+              width = maxWidth;
+            }
+          } else {
+            if (height > maxHeight) {
+              width = Math.round((width * maxHeight) / height);
+              height = maxHeight;
+            }
+          }
+
+          canvas.width = width;
+          canvas.height = height;
+          const ctx = canvas.getContext('2d');
+          if (!ctx) {
+            resolve(event.target?.result as string);
+            return;
+          }
+
+          ctx.drawImage(img, 0, 0, width, height);
+          const dataUrl = canvas.toDataURL('image/jpeg', 0.75);
+          resolve(dataUrl);
+        };
+        img.onerror = (err) => reject(err);
+      };
+      reader.onerror = (err) => reject(err);
+    });
+  };
+
+  const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    
+    if (file.size > 5 * 1024 * 1024) {
+      alert("ফাইলটি অনেক বড়! দয়া করে ৫ মেগাবাইটের নিচের ছবি আপলোড করুন।");
+      return;
+    }
+
+    setIsUploading(true);
+
+    let base64Fallback: string | null = null;
+    try {
+      base64Fallback = await resizeImage(file);
+    } catch (err) {
+      console.log("Local base64 resize failed:", err);
+    }
+
+    if (base64Fallback) {
+      setFormData(prev => ({ ...prev, imageUrl: base64Fallback }));
+    }
+
+    if (storage && auth.currentUser && base64Fallback) {
+      const fileName = `${Date.now()}_${file.name.replace(/\s+/g, '_')}`;
+      const storageRef = ref(storage, `products/${fileName}`);
+      
+      uploadBytes(storageRef, file)
+        .then(() => getDownloadURL(storageRef))
+        .then((url) => {
+          setFormData(prev => ({ ...prev, imageUrl: url }));
+        })
+        .catch((err) => {
+          console.log("Firebase Storage upload skipped, using base64:", err.message || err);
+        });
+    }
+
+    setIsUploading(false); 
+    if (fileInputRef.current) fileInputRef.current.value = '';
+  };
+
+  const openAddModal = (type: 'finished_good' | 'raw_material' = 'finished_good') => {
+    setEditingId(null);
+    setFormData({
+      name: '',
+      sku: '',
+      purchasePrice: 0,
+      salePrice: 0,
+      wholesalePrice: 0,
+      distributorPrice: 0,
+      unit: type === 'raw_material' ? 'kg' : 'pcs',
+      stock: 0,
+      minStock: 5,
+      category: 'other',
+      imageUrl: '',
+      status: 'active',
+      productType: type,
+      rawMaterialCategory: 'general',
+      supplierId: '',
+      supplierName: '',
+      dateAdded: new Date().toISOString().split('T')[0]
+    });
+    setShowModal(true);
+  };
+
+  const openEditModal = (p: Product) => {
+    setEditingId(p.id);
+    setFormData({
+      ...p,
+      productType: p.productType || 'finished_good'
+    });
+    setShowModal(true);
+  };
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!formData.name?.trim()) {
+      alert("পণ্যের নাম আবশ্যক।");
+      return;
+    }
+
+    const selectedSupplier = suppliers.find(s => s.id === formData.supplierId);
+    
+    const productData: Product = { 
+      ...formData, 
+      id: editingId || Date.now().toString(),
+      name: formData.name.trim(),
+      purchasePrice: Number(formData.purchasePrice) || 0,
+      salePrice: Number(formData.salePrice) || 0,
+      wholesalePrice: Number(formData.wholesalePrice) || 0,
+      distributorPrice: Number(formData.distributorPrice) || 0,
+      stock: Number(formData.stock) || 0,
+      minStock: Number(formData.minStock) || 5,
+      unit: formData.unit || (formData.productType === 'raw_material' ? 'kg' : 'pcs'),
+      category: formData.category || 'other',
+      productType: formData.productType || 'finished_good',
+      supplierId: formData.supplierId || '',
+      supplierName: selectedSupplier?.name || formData.supplierName || '',
+      dateAdded: formData.dateAdded || new Date().toISOString()
+    } as Product;
+
+    onUpdate([productData]);
+    setShowModal(false);
+    setEditingId(null);
+  };
 
   const handleStockSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -142,10 +313,13 @@ const Products: React.FC<ProductsProps> = ({
       id: Date.now().toString(),
       productId: product.id,
       productName: product.name,
-      quantity: stockEntryForm.quantity,
+      quantity: Number(stockEntryForm.quantity),
       date: stockEntryForm.date,
       addedBy: currentStaff?.id,
-      note: stockEntryForm.note
+      note: stockEntryForm.note,
+      productType: product.productType || 'finished_good',
+      entryType: 'manual_add',
+      unit: product.unit
     };
 
     const updatedProducts = products.map(p => 
@@ -160,104 +334,154 @@ const Products: React.FC<ProductsProps> = ({
       date: new Date().toISOString().split('T')[0],
       note: ''
     });
+    alert(`${product.name}-এর স্টকে ${stockEntryForm.quantity} ${product.unit} যোগ করা হয়েছে।`);
   };
 
-  const filteredProducts = useMemo(() => {
-    if (!Array.isArray(products)) return [];
-    return products
-      .filter(p => {
-        if (!p) return false;
-        const matchesSearch = (p.name || '').toLowerCase().includes(search.toLowerCase()) || 
-                             (p.sku || '').toLowerCase().includes(search.toLowerCase());
-        const matchesCategory = selectedCategory === 'all' || (p.category || '').trim() === (selectedCategory || '').trim();
-        return matchesSearch && matchesCategory;
-      })
-      .sort((a, b) => (b.dateAdded || '').localeCompare(a.dateAdded || ''));
-  }, [products, search, selectedCategory]);
-
-  const getStockStatus = (stock: number, minStock: number) => {
-    if (stock <= 0) return { label: 'Out of Stock', color: 'bg-rose-100 text-rose-600 border-rose-200' };
-    if (stock <= minStock) return { label: 'Low Stock', color: 'bg-amber-100 text-amber-600 border-amber-200' };
-    return { label: 'In Stock', color: 'bg-emerald-100 text-emerald-600 border-emerald-200' };
-  };
-
-  const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    
-    // File size limit (e.g., 5MB)
-    if (file.size > 5 * 1024 * 1024) {
-      alert("ফাইলটি অনেক বড়! দয়াপি ৫ মেগাবাইটের নিচের ছবি আপলোড করুন।");
-      return;
-    }
-
-    if (!storage || !auth.currentUser) {
-      console.error("Firebase Storage or Auth is not initialized.", { storage: !!storage, user: !!auth.currentUser });
-      alert(auth.currentUser ? "স্টোরেজ এরর: ফায়ারবেস স্টোরেজ খুঁজে পাওয়া যায়নি।" : "দয়াকরুন লগইন করে পুনরায় চেষ্টা করুন। ছবি আপলোড করার জন্য লগইন প্রয়োজন।");
-      return;
-    }
-
-    setIsUploading(true);
-    console.log("Starting upload:", file.name, "size:", file.size);
-    console.log("Storage Bucket:", storage.app.options.storageBucket);
-    
-    try {
-      const fileName = `${Date.now()}_${file.name.replace(/\s+/g, '_')}`;
-      const bucketName = storage.app.options.storageBucket;
-      const storageRef = ref(storage, `products/${fileName}`);
-      
-      console.log("Attempting upload to bucket:", bucketName);
-      console.log("Ref path:", storageRef.fullPath);
-      
-      // Use uploadBytes which is more robust in some environments
-      const result = await uploadBytes(storageRef, file);
-      console.log("Upload success:", result.metadata.fullPath);
-
-      const url = await getDownloadURL(storageRef);
-      setFormData(prev => ({ ...prev, imageUrl: url }));
-      alert("ছবি সফলভাবে আপলোড হয়েছে!");
-    } catch (err: any) { 
-      console.error("Firebase Storage Upload Error:", err);
-      let errorMsg = "ছবি আপলোড করা সম্ভব হয়নি।";
-      
-      if (err.code === 'storage/retry-limit-exceeded') {
-        errorMsg = `সার্ভারের সাথে সংযোগ করা যাচ্ছে না। দয়া করে আপনার ইন্টারনেট চেক করুন এবং নিশ্চিত করুন যে ফায়ারবেস কনফিগারেশন সঠিক আছে।\nবাকেট: ${storage.app.options.storageBucket}`;
-      } else if (err.code === 'storage/unauthorized') {
-        errorMsg = "আপনার ছবি আপলোড করার অনুমতি নেই (Permission Denied)। Storage Rules আপডেট করা প্রয়োজন হতে পারে।";
-      } else if (err.code === 'storage/quota-exceeded') {
-        errorMsg = "আপনার ফায়ারবেস স্টোরেজ কোটা (Storage Quota) শেষ হয়ে গেছে।";
-      } else if (err.code === 'storage/invalid-checksum') {
-        errorMsg = "ছবির ডাটা ট্রান্সফারে সমস্যা হয়েছে। আবার চেষ্টা করুন।";
-      } else {
-        errorMsg = `একটি সমস্যা হয়েছে: ${err.message || 'অজানা ত্রুটি'}`;
-      }
-      
-      alert(`${errorMsg}\n\nError Code: ${err.code}`); 
-    } finally { 
-      setIsUploading(false); 
-      if (fileInputRef.current) fileInputRef.current.value = '';
-    }
-  };
-
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    console.log("Submitting product data:", formData);
-    
-    const productData = { 
-      ...formData, 
-      id: editingId || Date.now().toString(),
-      dateAdded: formData.dateAdded || new Date().toISOString()
-    } as Product;
-
-    onUpdate([productData]);
-    
-    setShowModal(false);
-    setEditingId(null);
-    setFormData({ 
-      name: '', sku: '', purchasePrice: 0, salePrice: 0, wholesalePrice: 0, distributorPrice: 0, 
-      unit: 'pcs', stock: 0, minStock: 10, category: 'other', imageUrl: '', status: 'active',
-      dateAdded: new Date().toISOString().split('T')[0]
+  // Production Batch Calculation & Submission
+  const calculatedBatch = useMemo(() => {
+    let totalRawMaterialCost = 0;
+    const validatedMaterials = batchForm.rawMaterials.map(item => {
+      const raw = rawMaterials.find(r => r.id === item.rawMaterialId);
+      const qty = Number(item.quantity) || 0;
+      const unitPrice = Number(raw?.purchasePrice) || 0;
+      const totalCost = qty * unitPrice;
+      totalRawMaterialCost += totalCost;
+      return {
+        rawMaterialId: item.rawMaterialId,
+        rawMaterialName: raw?.name || 'Unknown Material',
+        quantity: qty,
+        unit: raw?.unit || 'kg',
+        unitPrice,
+        totalCost,
+        currentStock: Number(raw?.stock) || 0
+      };
     });
+
+    const totalBatchCost = totalRawMaterialCost + (Number(batchForm.laborCost) || 0) + (Number(batchForm.otherCost) || 0);
+    const producedQty = Number(batchForm.producedQuantity) || 1;
+    const unitProductionCost = producedQty > 0 ? Math.round(totalBatchCost / producedQty) : 0;
+
+    const targetProduct = finishedGoods.find(p => p.id === batchForm.producedProductId);
+    const totalProducedValue = targetProduct ? (producedQty * (targetProduct.salePrice || unitProductionCost)) : (producedQty * unitProductionCost);
+
+    return {
+      validatedMaterials,
+      totalRawMaterialCost,
+      totalBatchCost,
+      unitProductionCost,
+      totalProducedValue,
+      targetProduct
+    };
+  }, [batchForm, rawMaterials, finishedGoods]);
+
+  const handleCreateBatch = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!batchForm.producedProductId) {
+      alert("অনুগ্রহ করে উৎপাদিত ফিনিশড পণ্য নির্বাচন করুন।");
+      return;
+    }
+    if (batchForm.producedQuantity <= 0) {
+      alert("উৎপাদিত পরিমাণ সঠিক নয়।");
+      return;
+    }
+    if (batchForm.rawMaterials.length === 0 || batchForm.rawMaterials.some(m => !m.rawMaterialId || m.quantity <= 0)) {
+      alert("কমপক্ষে একটি কাঁচামাল সঠিক পরিমাণসহ নির্বাচন করুন।");
+      return;
+    }
+
+    // Check raw material stock availability
+    for (const mat of calculatedBatch.validatedMaterials) {
+      if (mat.quantity > mat.currentStock) {
+        alert(`কাঁচামাল "${mat.rawMaterialName}"-এর পর্যাপ্ত স্টক নেই! বর্তমান স্টক: ${mat.currentStock} ${mat.unit}, প্রয়োজন: ${mat.quantity} ${mat.unit}`);
+        return;
+      }
+    }
+
+    const batchNo = `BATCH-${Date.now().toString().slice(-6)}`;
+    const newBatch: ProductionBatch = {
+      id: Date.now().toString(),
+      batchNo,
+      date: batchForm.date,
+      producedProductId: batchForm.producedProductId,
+      producedProductName: calculatedBatch.targetProduct?.name || 'Produced Item',
+      producedQuantity: Number(batchForm.producedQuantity),
+      unit: calculatedBatch.targetProduct?.unit || batchForm.unit || 'pcs',
+      unitProductionCost: calculatedBatch.unitProductionCost,
+      totalProducedValue: calculatedBatch.totalProducedValue,
+      rawMaterialsUsed: calculatedBatch.validatedMaterials.map(m => ({
+        rawMaterialId: m.rawMaterialId,
+        rawMaterialName: m.rawMaterialName,
+        quantity: m.quantity,
+        unit: m.unit,
+        unitPrice: m.unitPrice,
+        totalCost: m.totalCost
+      })),
+      totalRawMaterialCost: calculatedBatch.totalRawMaterialCost,
+      laborCost: Number(batchForm.laborCost) || 0,
+      otherCost: Number(batchForm.otherCost) || 0,
+      totalBatchCost: calculatedBatch.totalBatchCost,
+      notes: batchForm.notes,
+      addedBy: currentStaff?.id
+    };
+
+    // Update stocks: subtract raw materials, add produced finished product
+    let updatedProducts = [...products];
+    
+    // Deduct raw materials
+    calculatedBatch.validatedMaterials.forEach(mat => {
+      updatedProducts = updatedProducts.map(p => {
+        if (p.id === mat.rawMaterialId) {
+          return { ...p, stock: Math.max(0, Number(p.stock) - Number(mat.quantity)) };
+        }
+        return p;
+      });
+    });
+
+    // Add finished good stock & optionally update unit purchase/production price
+    updatedProducts = updatedProducts.map(p => {
+      if (p.id === batchForm.producedProductId) {
+        return { 
+          ...p, 
+          stock: Number(p.stock) + Number(batchForm.producedQuantity),
+          purchasePrice: calculatedBatch.unitProductionCost > 0 ? calculatedBatch.unitProductionCost : p.purchasePrice
+        };
+      }
+      return p;
+    });
+
+    // Generate Stock entries for audit trail
+    const stockEntriesToLog: StockEntry[] = [
+      {
+        id: `STK-${Date.now()}-OUT`,
+        productId: batchForm.producedProductId,
+        productName: calculatedBatch.targetProduct?.name || 'Produced Good',
+        quantity: Number(batchForm.producedQuantity),
+        date: batchForm.date,
+        addedBy: currentStaff?.id,
+        note: `উৎপাদন ব্যাচ #${batchNo} হতে আউটপুট যোগ`,
+        productType: 'finished_good',
+        entryType: 'production_output',
+        unit: calculatedBatch.targetProduct?.unit || 'pcs'
+      }
+    ];
+
+    if (onProductionBatchComplete) {
+      onProductionBatchComplete(newBatch, updatedProducts, stockEntriesToLog);
+    }
+
+    setShowBatchModal(false);
+    setBatchForm({
+      producedProductId: '',
+      producedQuantity: 1,
+      unit: 'pcs',
+      date: new Date().toISOString().split('T')[0],
+      laborCost: 0,
+      otherCost: 0,
+      notes: '',
+      rawMaterials: [{ rawMaterialId: '', quantity: 1 }]
+    });
+
+    alert(`উৎপাদন ব্যাচ #${batchNo} সফলভাবে সম্পন্ন হয়েছে! ${newBatch.producedQuantity} ${newBatch.unit} ${newBatch.producedProductName} স্টকে যুক্ত করা হয়েছে।`);
   };
 
   const handleAddCategory = (e: React.FormEvent) => {
@@ -274,605 +498,1063 @@ const Products: React.FC<ProductsProps> = ({
     setShowCategoryModal(false);
   };
 
-  const stats = useMemo(() => {
-    const totalItems = products.length;
-    const totalStockValue = products.reduce((sum, p) => sum + (p.stock * (p.purchasePrice || 0)), 0);
-    const lowStockItems = products.filter(p => p.stock <= (p.minStock || 5)).length;
-
-    // Stock addition analysis (from purchases)
-    const now = new Date();
-    const todayStr = now.toISOString().split('T')[0];
-    const monthStr = now.toISOString().slice(0, 7);
-    const yearStr = now.toISOString().slice(0, 4);
-
-    const additions = purchases.reduce((acc, pur) => {
-      const purDate = pur.date.split('T')[0];
-      const itemsQty = pur.items.reduce((s, i) => s + i.quantity, 0);
-      
-      acc.lifetime += itemsQty;
-      if (purDate === todayStr) acc.today += itemsQty;
-      if (purDate.startsWith(monthStr)) acc.month += itemsQty;
-      if (purDate.startsWith(yearStr)) acc.year += itemsQty;
-      
-      return acc;
-    }, { today: 0, month: 0, year: 0, lifetime: 0 });
-
-    return { totalItems, totalStockValue, lowStockItems, additions };
-  }, [products, purchases]);
-
   return (
-    <div className="space-y-6 animate-in fade-in duration-500 pb-12">
-      {/* Category Management Modal */}
-      {showCategoryModal && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-md">
-          <motion.div initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} className="bg-white w-full max-w-md rounded-[32px] overflow-hidden shadow-2xl">
-            <div className="p-8 border-b border-slate-50 flex justify-between items-center bg-slate-50/50">
-              <div>
-                <h3 className="text-xl font-black text-slate-800 tracking-tight">Categories</h3>
-                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-1">ক্যাটাগরি ব্যবস্থাপনা</p>
-              </div>
-              <button onClick={() => setShowCategoryModal(false)} className="p-2 hover:bg-slate-200 rounded-xl transition-all"><X size={20}/></button>
-            </div>
-            <div className="p-8">
-              <form onSubmit={handleAddCategory} className="mb-8">
-                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-3 block ml-1">নতুন ক্যাটাগরি</label>
-                <div className="flex gap-2">
-                  <input name="categoryName" type="text" placeholder="ক্যাটাগরির নাম লিখুন..." className="flex-1 bg-slate-50 border-2 border-slate-100 rounded-2xl px-5 py-4 font-bold text-sm outline-none focus:bg-white focus:border-primary/20 transition-all" required />
-                  <button type="submit" className="bg-primary text-white p-4 rounded-2xl shadow-lg shadow-primary/20 active:scale-95 transition-all"><Plus size={20}/></button>
-                </div>
-              </form>
-              <div className="space-y-3 max-h-[300px] overflow-y-auto pr-2 custom-scrollbar">
-                {categories.map(cat => (
-                  <div key={cat.id} className="flex items-center justify-between p-4 bg-slate-50 rounded-2xl border-2 border-transparent hover:border-slate-100 transition-all group">
-                    <div className="flex items-center gap-3">
-                      <div className="w-10 h-10 bg-white rounded-xl flex items-center justify-center text-primary shadow-sm group-hover:scale-110 transition-transform">
-                        <Tag size={18}/>
-                      </div>
-                      <span className="font-black text-slate-700">{cat.name}</span>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </motion.div>
+    <div className="space-y-8 animate-in fade-in duration-500 pb-20">
+      {/* Top Header Card */}
+      <div className="bg-white p-8 rounded-[40px] border-2 border-slate-50 shadow-sm flex flex-col lg:flex-row justify-between items-start lg:items-center gap-6">
+        <div className="flex items-center gap-5">
+          <div className="bg-primary p-4 rounded-3xl text-white shadow-2xl shadow-primary/20 flex items-center justify-center">
+            <Package size={32} strokeWidth={2.5} />
+          </div>
+          <div>
+            <h2 className="text-3xl font-black text-slate-900 tracking-tight uppercase">মজুদ ও উৎপাদন ইনভেন্টরি</h2>
+            <p className="text-[10px] font-black text-slate-400 uppercase tracking-[4px] mt-1 flex items-center gap-2">
+              <Factory size={14} className="text-primary"/> কাঁচামাল ক্রয়, ফিনিশড স্টক ও রূপান্তর ব্যবস্থাপনা
+            </p>
+          </div>
         </div>
-      )}
 
-      {/* Stock Entry Modal */}
-      {showStockModal && (
-        <div className="fixed inset-0 z-[110] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-md">
-          <motion.div initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} className="bg-white w-full max-w-lg rounded-[48px] overflow-hidden shadow-2xl">
-            <div className="p-10 border-b border-slate-50 flex justify-between items-center bg-slate-50/50">
-              <div className="flex items-center gap-4">
-                <div className="bg-emerald-600 p-3 rounded-2xl text-white shadow-lg"><Plus size={24}/></div>
-                <div>
-                  <h3 className="text-xl font-black text-slate-800 tracking-tight uppercase">Daily Stock Entry</h3>
-                  <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mt-1">প্রতি দিনের স্টক এড করুন</p>
-                </div>
-              </div>
-              <button onClick={() => setShowStockModal(false)} className="p-3 text-slate-300 hover:text-rose-500 hover:bg-rose-50 rounded-2xl transition-all"><X size={32}/></button>
-            </div>
-            
-            <form onSubmit={handleStockSubmit} className="p-10 space-y-8">
-              <div className="space-y-2">
-                <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">পণ্য নির্বাচন করুন</label>
-                <select 
-                  required
-                  className="w-full border-2 border-slate-100 rounded-2xl p-4.5 font-black text-sm bg-slate-50 outline-none focus:bg-white focus:ring-4 focus:ring-primary/5 transition-all"
-                  value={stockEntryForm.productId}
-                  onChange={e => setStockEntryForm({...stockEntryForm, productId: e.target.value})}
-                >
-                  <option value="">সিলেক্ট করুন...</option>
-                  {products.map(p => (
-                    <option key={p.id} value={p.id}>{p.name} (Stock: {p.stock} {p.unit})</option>
-                  ))}
-                </select>
-              </div>
+        {/* Action Buttons */}
+        <div className="flex flex-wrap items-center gap-3 w-full lg:w-auto">
+          <button 
+            onClick={() => openAddModal(activeTab === 'raw_materials' ? 'raw_material' : 'finished_good')}
+            className="flex-1 sm:flex-none bg-primary text-white px-6 py-4 rounded-2xl font-black text-xs uppercase tracking-widest shadow-xl shadow-primary/20 hover:scale-105 active:scale-95 transition-all flex items-center justify-center gap-2"
+          >
+            <Plus size={18}/> {activeTab === 'raw_materials' ? 'নতুন কাঁচামাল' : 'নতুন পণ্য'}
+          </button>
 
-              <div className="grid grid-cols-2 gap-6">
-                <div className="space-y-2">
-                  <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">পরিমাণ (Quantity)</label>
-                  <input 
-                    type="number"
-                    required
-                    min="1"
-                    className="w-full border-2 border-slate-100 rounded-2xl p-4.5 font-black text-lg bg-slate-50 outline-none focus:bg-white transition-all"
-                    value={stockEntryForm.quantity || ''}
-                    onChange={e => setStockEntryForm({...stockEntryForm, quantity: parseInt(e.target.value) || 0})}
-                  />
-                </div>
-                <div className="space-y-2">
-                  <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">তারিখ</label>
-                  <input 
-                    type="date"
-                    required
-                    className="w-full border-2 border-slate-100 rounded-2xl p-4.5 font-black text-xs bg-slate-50 outline-none focus:bg-white transition-all"
-                    value={stockEntryForm.date}
-                    onChange={e => setStockEntryForm({...stockEntryForm, date: e.target.value})}
-                  />
-                </div>
-              </div>
+          <button 
+            onClick={() => setShowBatchModal(true)}
+            className="flex-1 sm:flex-none bg-amber-500 hover:bg-amber-600 text-white px-6 py-4 rounded-2xl font-black text-xs uppercase tracking-widest shadow-xl shadow-amber-500/20 hover:scale-105 active:scale-95 transition-all flex items-center justify-center gap-2"
+          >
+            <Factory size={18}/> উৎপাদন ব্যাচ তৈরি
+          </button>
 
-              <div className="space-y-2">
-                <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">নোট (ঐচ্ছিক)</label>
-                <input 
-                  type="text"
-                  placeholder="অতিরিক্ত তথ্য..."
-                  className="w-full border-2 border-slate-100 rounded-2xl p-4.5 font-black text-sm bg-slate-50 outline-none focus:bg-white transition-all"
-                  value={stockEntryForm.note}
-                  onChange={e => setStockEntryForm({...stockEntryForm, note: e.target.value})}
-                />
-              </div>
+          <button 
+            onClick={() => setShowStockModal(true)}
+            className="flex-1 sm:flex-none bg-emerald-600 hover:bg-emerald-700 text-white px-5 py-4 rounded-2xl font-black text-xs uppercase tracking-widest shadow-xl shadow-emerald-600/20 hover:scale-105 active:scale-95 transition-all flex items-center justify-center gap-2"
+          >
+            <TrendingUp size={18}/> দৈনিক স্টক এন্ট্রি
+          </button>
 
-              <button className="w-full bg-emerald-600 text-white py-6 rounded-[28px] font-black uppercase text-xs tracking-[4px] shadow-2xl shadow-emerald-600/30 active:scale-95 transition-all flex items-center justify-center gap-4 mt-4">
-                <Save size={20}/> আপডেট স্টক
+          <button 
+            onClick={() => setShowCategoryModal(true)}
+            className="bg-slate-100 hover:bg-slate-200 text-slate-700 p-4 rounded-2xl font-black text-xs uppercase transition-all flex items-center gap-2"
+            title="ক্যাটাগরি পরিচালনা"
+          >
+            <Tag size={18}/>
+          </button>
+        </div>
+      </div>
+
+      {/* KPI Overview Metrics */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
+        <div className="bg-indigo-600 p-7 rounded-[36px] text-white shadow-xl shadow-indigo-600/20 relative overflow-hidden group">
+          <div className="absolute -right-4 -top-4 w-24 h-24 bg-white/10 rounded-full blur-2xl group-hover:scale-150 transition-all duration-700"></div>
+          <p className="text-[10px] font-black uppercase tracking-[3px] opacity-80 mb-2">📦 রেডি পণ্য স্টক ভ্যালু</p>
+          <h3 className="text-3xl font-black tracking-tight">৳{inventoryStats.finishedStockValue.toLocaleString()}</h3>
+          <div className="mt-4 flex items-center justify-between text-[10px] font-black bg-white/10 px-3.5 py-1.5 rounded-full">
+            <span>{finishedGoods.length}টি রেডি আইটেম</span>
+            <span>মোট {inventoryStats.totalFinishedStock.toLocaleString()} পিস/একক</span>
+          </div>
+        </div>
+
+        <div className="bg-amber-600 p-7 rounded-[36px] text-white shadow-xl shadow-amber-600/20 relative overflow-hidden group">
+          <div className="absolute -right-4 -top-4 w-24 h-24 bg-white/10 rounded-full blur-2xl group-hover:scale-150 transition-all duration-700"></div>
+          <p className="text-[10px] font-black uppercase tracking-[3px] opacity-80 mb-2">🌾 কাঁচামাল স্টক ভ্যালু</p>
+          <h3 className="text-3xl font-black tracking-tight">৳{inventoryStats.rawStockValue.toLocaleString()}</h3>
+          <div className="mt-4 flex items-center justify-between text-[10px] font-black bg-white/10 px-3.5 py-1.5 rounded-full">
+            <span>{rawMaterials.length} প্রকার কাঁচামাল</span>
+            <span>মোট {inventoryStats.totalRawStock.toLocaleString()} ইউনিট</span>
+          </div>
+        </div>
+
+        <div className="bg-emerald-600 p-7 rounded-[36px] text-white shadow-xl shadow-emerald-600/20 relative overflow-hidden group">
+          <div className="absolute -right-4 -top-4 w-24 h-24 bg-white/10 rounded-full blur-2xl group-hover:scale-150 transition-all duration-700"></div>
+          <p className="text-[10px] font-black uppercase tracking-[3px] opacity-80 mb-2">⚙️ উৎপাদন রূপান্তর ব্যাচ</p>
+          <h3 className="text-3xl font-black tracking-tight">{inventoryStats.totalBatches} <span className="text-lg font-bold">টি ব্যাচ</span></h3>
+          <div className="mt-4 flex items-center justify-between text-[10px] font-black bg-white/10 px-3.5 py-1.5 rounded-full">
+            <span>কাঁচামাল রূপান্তর সম্পন্ন</span>
+            <span className="flex items-center gap-1"><CheckCircle2 size={12}/> সক্রিয়</span>
+          </div>
+        </div>
+
+        <div className="bg-rose-600 p-7 rounded-[36px] text-white shadow-xl shadow-rose-600/20 relative overflow-hidden group">
+          <div className="absolute -right-4 -top-4 w-24 h-24 bg-white/10 rounded-full blur-2xl group-hover:scale-150 transition-all duration-700"></div>
+          <p className="text-[10px] font-black uppercase tracking-[3px] opacity-80 mb-2">⚠️ স্টক সতর্কতা</p>
+          <h3 className="text-3xl font-black tracking-tight">{inventoryStats.lowStockCount} <span className="text-lg font-bold">টি পণ্য</span></h3>
+          <div className="mt-4 flex items-center justify-between text-[10px] font-black bg-white/10 px-3.5 py-1.5 rounded-full">
+            <span>মজুদ সীমার নিচে</span>
+            <span className="flex items-center gap-1"><AlertTriangle size={12}/> রিস্টক প্রয়োজন</span>
+          </div>
+        </div>
+      </div>
+
+      {/* Main Sub Tabs */}
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 bg-white p-3 rounded-[32px] border-2 border-slate-50 shadow-sm">
+        <div className="flex flex-wrap gap-2">
+          <button 
+            onClick={() => { setActiveTab('finished_goods'); setSelectedCategory('all'); }} 
+            className={`px-6 py-3.5 rounded-2xl text-xs font-black uppercase tracking-widest transition-all flex items-center gap-2.5 ${activeTab === 'finished_goods' ? 'bg-primary text-white shadow-lg shadow-primary/20' : 'text-slate-500 hover:text-slate-800 hover:bg-slate-50'}`}
+          >
+            <Package size={16}/> 📦 উৎপাদিত / রেডি পণ্য ({finishedGoods.length})
+          </button>
+
+          <button 
+            onClick={() => { setActiveTab('raw_materials'); setSelectedCategory('all'); }} 
+            className={`px-6 py-3.5 rounded-2xl text-xs font-black uppercase tracking-widest transition-all flex items-center gap-2.5 ${activeTab === 'raw_materials' ? 'bg-amber-600 text-white shadow-lg shadow-amber-600/20' : 'text-slate-500 hover:text-slate-800 hover:bg-slate-50'}`}
+          >
+            <Layers size={16}/> 🌾 কাঁচামাল স্টক ({rawMaterials.length})
+          </button>
+
+          <button 
+            onClick={() => setActiveTab('production_batches')} 
+            className={`px-6 py-3.5 rounded-2xl text-xs font-black uppercase tracking-widest transition-all flex items-center gap-2.5 ${activeTab === 'production_batches' ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-600/20' : 'text-slate-500 hover:text-slate-800 hover:bg-slate-50'}`}
+          >
+            <Factory size={16}/> ⚙️ উৎপাদন ব্যাচ ইতিহাস ({productionBatches.length})
+          </button>
+
+          <button 
+            onClick={() => setActiveTab('stock_history')} 
+            className={`px-6 py-3.5 rounded-2xl text-xs font-black uppercase tracking-widest transition-all flex items-center gap-2.5 ${activeTab === 'stock_history' ? 'bg-slate-900 text-white shadow-lg shadow-slate-900/20' : 'text-slate-500 hover:text-slate-800 hover:bg-slate-50'}`}
+          >
+            <History size={16}/> 📜 দৈনিক স্টক এন্ট্রি লগ ({stockEntries.length})
+          </button>
+        </div>
+
+        {/* View mode toggle for inventory tabs */}
+        {(activeTab === 'finished_goods' || activeTab === 'raw_materials') && (
+          <div className="flex items-center gap-2 bg-slate-100 p-1.5 rounded-2xl">
+            <button 
+              onClick={() => setViewMode('grid')}
+              className={`p-2.5 rounded-xl transition-all ${viewMode === 'grid' ? 'bg-white text-primary shadow-sm' : 'text-slate-400 hover:text-slate-600'}`}
+              title="গ্রিড ভিউ"
+            >
+              <LayoutGrid size={16}/>
+            </button>
+            <button 
+              onClick={() => setViewMode('table')}
+              className={`p-2.5 rounded-xl transition-all ${viewMode === 'table' ? 'bg-white text-primary shadow-sm' : 'text-slate-400 hover:text-slate-600'}`}
+              title="টেবিল ভিউ"
+            >
+              <ListIcon size={16}/>
+            </button>
+          </div>
+        )}
+      </div>
+
+      {/* Filters & Search for Finished Goods / Raw Materials */}
+      {(activeTab === 'finished_goods' || activeTab === 'raw_materials') && (
+        <div className="grid grid-cols-1 md:grid-cols-12 gap-4">
+          <div className="md:col-span-8 bg-white p-2 rounded-2xl border-2 border-slate-50 shadow-sm flex items-center">
+            <Search size={20} className="text-slate-400 ml-4 mr-2" />
+            <input 
+              type="text"
+              placeholder={activeTab === 'raw_materials' ? "কাঁচামালের নাম বা কোড দিয়ে খুঁজুন..." : "পণ্যের নাম, SKU বা বারকোড দিয়ে খুঁজুন..."}
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+              className="w-full p-3 font-bold text-sm bg-transparent outline-none text-slate-700"
+            />
+            {search && (
+              <button onClick={() => setSearch('')} className="p-2 text-slate-400 hover:text-rose-500 mr-2">
+                <X size={16}/>
               </button>
-            </form>
-          </motion.div>
+            )}
+          </div>
+
+          <div className="md:col-span-4 bg-white p-2 rounded-2xl border-2 border-slate-50 shadow-sm flex items-center">
+            <select 
+              value={selectedCategory} 
+              onChange={e => setSelectedCategory(e.target.value)}
+              className="w-full p-3 font-bold text-sm bg-transparent outline-none text-slate-700 cursor-pointer"
+            >
+              <option value="all">সব ক্যাটাগরি ({displayedItems.length})</option>
+              {categories.map(c => <option key={c.id} value={c.slug}>{c.name}</option>)}
+            </select>
+          </div>
         </div>
       )}
 
-      {/* Modern Dashboard Header */}
-      <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
-        <div className="lg:col-span-2 bg-white p-8 rounded-[48px] border-2 border-slate-50 shadow-sm flex items-center justify-between group">
-           <div className="flex items-center gap-6">
-              <div className="bg-primary p-5 rounded-[28px] text-white shadow-2xl shadow-primary/20 transition-transform group-hover:scale-110">
-                <Package size={34} strokeWidth={2.5} />
+      {/* TAB 1 & 2: Inventory Items (Finished Goods or Raw Materials) */}
+      {(activeTab === 'finished_goods' || activeTab === 'raw_materials') && (
+        <>
+          {displayedItems.length === 0 ? (
+            <div className="bg-white p-16 rounded-[40px] text-center border-2 border-slate-50 shadow-sm">
+              <div className="w-20 h-20 bg-slate-50 rounded-full flex items-center justify-center mx-auto text-slate-300 mb-4">
+                <Package size={40} />
               </div>
-              <div>
-                <h2 className="text-3xl font-black text-slate-900 tracking-tighter uppercase leading-none">মজুদ মালামাল</h2>
-                <p className="text-[10px] font-black text-slate-400 uppercase tracking-[4px] mt-2 flex items-center gap-2">
-                   <TrendingUp size={12} className="text-primary"/> ইনভেন্টরি ও স্টক বিশ্লেষণ
-                </p>
-              </div>
-           </div>
-           <div className="hidden sm:flex flex-col items-end">
-              <span className="text-2xl font-black text-slate-900 tracking-tighter">৳{stockStats.totalValue.toLocaleString()}</span>
-              <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest mt-1">মোট স্টক ভ্যালু</span>
-           </div>
-        </div>
-
-        <div className="bg-slate-900 p-8 rounded-[48px] shadow-2xl shadow-slate-900/20 text-white relative overflow-hidden group">
-           <div className="absolute -right-4 -top-4 w-24 h-24 bg-white/5 rounded-full group-hover:scale-150 transition-transform duration-700"></div>
-           <div className="relative z-10 h-full flex flex-col justify-between">
-              <div className="flex items-center justify-between">
-                 <div className="p-2 bg-white/10 rounded-xl"><Plus size={16}/></div>
-                 <span className="text-[8px] font-black uppercase tracking-widest text-emerald-400">Add Stock</span>
-              </div>
-              <div className="flex justify-between items-end mt-4">
-                 <div>
-                    <h4 className="text-sm font-bold text-slate-400 uppercase tracking-widest mb-1">আজকের আপডেট</h4>
-                    <div className="text-4xl font-black tracking-tighter text-white">{stockStats.today} <span className="text-sm font-medium text-slate-500">Unit</span></div>
-                    <div className="text-[10px] font-black text-emerald-400 uppercase tracking-tighter mt-1">Value: ৳{stockStats.todayValue.toLocaleString()}</div>
-                 </div>
-                 <button onClick={() => setShowStockModal(true)} className="bg-primary text-white p-4 rounded-2xl shadow-xl hover:scale-110 active:scale-90 transition-all">
-                    <Plus size={24}/>
-                 </button>
-              </div>
-           </div>
-        </div>
-
-        <div className="bg-white p-8 rounded-[48px] border-2 border-slate-50 shadow-sm flex flex-col justify-between">
-           <div className="flex justify-between items-start">
-              <span className="text-[10px] font-black text-slate-400 uppercase tracking-[4px]">স্টক এলার্ট</span>
-              <AlertCircle size={18} className="text-amber-500"/>
-           </div>
-           <div className="mt-4">
-              <div className="text-2xl font-black text-slate-900 tracking-tighter">{stockStats.lowStockCount}টি পণ্য</div>
-              <p className="text-[9px] font-black text-amber-500 uppercase tracking-widest mt-1">মজুদ ফুরিয়ে আসছে</p>
-           </div>
-        </div>
-      </div>
-
-      {/* Detailed Addition Analytics */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-6">
-         <div className="bg-white p-7 rounded-[40px] border-2 border-slate-50 flex flex-col items-center text-center group hover:bg-indigo-50 transition-all shadow-sm">
-            <div className="w-14 h-14 bg-indigo-100 text-indigo-600 rounded-2xl flex items-center justify-center mb-4 group-hover:scale-110 transition-transform"><Clock size={24}/></div>
-            <span className="text-[10px] font-black text-slate-400 uppercase tracking-[2px] mb-1">আজকের স্টক</span>
-            <div className="text-2xl font-black text-slate-900 tracking-tighter">{stockStats.today} Unit</div>
-            <div className="text-[10px] font-black text-indigo-600 uppercase tracking-tighter mt-1">Value: ৳{stockStats.todayValue.toLocaleString()}</div>
-         </div>
-         <div className="bg-white p-7 rounded-[40px] border-2 border-slate-50 flex flex-col items-center text-center group hover:bg-emerald-50 transition-all shadow-sm">
-            <div className="w-14 h-14 bg-emerald-100 text-emerald-600 rounded-2xl flex items-center justify-center mb-4 group-hover:scale-110 transition-transform"><Calendar size={24}/></div>
-            <span className="text-[10px] font-black text-slate-400 uppercase tracking-[2px] mb-1">চলতি মাস</span>
-            <div className="text-2xl font-black text-slate-900 tracking-tighter">{stockStats.month} Unit</div>
-            <div className="text-[10px] font-black text-emerald-600 uppercase tracking-tighter mt-1">Value: ৳{stockStats.monthValue.toLocaleString()}</div>
-         </div>
-         <div className="bg-white p-7 rounded-[40px] border-2 border-slate-50 flex flex-col items-center text-center group hover:bg-amber-50 transition-all shadow-sm">
-            <div className="w-14 h-14 bg-amber-100 text-amber-600 rounded-2xl flex items-center justify-center mb-4 group-hover:scale-110 transition-transform"><TrendingUp size={24}/></div>
-            <span className="text-[10px] font-black text-slate-400 uppercase tracking-[2px] mb-1">চলতি বছর</span>
-            <div className="text-2xl font-black text-slate-900 tracking-tighter">{stockStats.year} Unit</div>
-            <div className="text-[10px] font-black text-amber-600 uppercase tracking-tighter mt-1">Value: ৳{stockStats.yearValue.toLocaleString()}</div>
-         </div>
-         <div className="bg-white p-7 rounded-[40px] border-2 border-slate-50 flex flex-col items-center text-center group hover:bg-primary/5 transition-all shadow-sm">
-            <div className="w-14 h-14 bg-primary/10 text-primary rounded-2xl flex items-center justify-center mb-4 group-hover:scale-110 transition-transform"><Package size={24}/></div>
-            <span className="text-[10px] font-black text-slate-400 uppercase tracking-[2px] mb-1">লাইফটাইম</span>
-            <div className="text-2xl font-black text-slate-900 tracking-tighter">{stockStats.lifetime} Unit</div>
-            <div className="text-[10px] font-black text-primary uppercase tracking-tighter mt-1">Value: ৳{stockStats.lifetimeValue.toLocaleString()}</div>
-         </div>
-      </div>
-
-      <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-8 bg-white p-8 rounded-[48px] border-2 border-slate-50 shadow-sm">
-        <div className="flex items-center gap-6">
-           <div className="bg-slate-900 p-5 rounded-3xl text-white"><LayoutGrid size={32}/></div>
-           <div>
-              <h3 className="text-2xl font-black text-slate-900 tracking-tight uppercase">ইনভেন্টরি লিস্ট</h3>
-              <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mt-1">স্টক সমন্বয় ও ডাটা পরিবর্তন করুন</p>
-           </div>
-        </div>
-        <div className="flex flex-wrap gap-4 w-full lg:w-auto">
-           <button onClick={() => setShowStockModal(true)} className="flex-1 lg:flex-none border-2 border-emerald-500 text-emerald-600 px-8 py-4 rounded-3xl font-black text-xs uppercase tracking-widest hover:bg-emerald-50 active-scale transition-all flex items-center justify-center gap-3">
-              <Plus size={20}/> ডেইলি স্টক এড
-           </button>
-           <button onClick={() => setShowCategoryModal(true)} className="flex-1 lg:flex-none bg-slate-50 text-slate-600 px-8 py-4 rounded-3xl font-black text-xs uppercase tracking-widest hover:bg-slate-100 transition-all">Categories</button>
-           <button onClick={() => { setEditingId(null); setShowModal(true); }} className="flex-1 lg:flex-none bg-primary text-white px-8 py-4 rounded-3xl font-black text-xs uppercase tracking-widest shadow-2xl shadow-primary/20 hover:scale-105 active:scale-95 transition-all flex items-center justify-center gap-3">
-              <Plus size={20}/> নতুন পণ্য এড
-           </button>
-        </div>
-      </div>
-
-      <div className="bg-white p-5 rounded-[36px] border-2 border-slate-100 shadow-sm flex flex-col md:flex-row gap-5">
-        <div className="flex-1 relative">
-          <Search className="absolute left-4 top-3.5 text-slate-400" size={20} />
-          <input type="text" placeholder="পণ্য বা বারকোড খুঁজুন..." className="w-full pl-12 pr-4 py-3.5 bg-slate-50 border-none rounded-2xl outline-none font-black text-sm" value={search} onChange={e => setSearch(e.target.value)} />
-        </div>
-        <div className="flex gap-3 overflow-x-auto no-scrollbar pb-1 md:pb-0">
-          <select className="bg-slate-50 px-4 py-3 rounded-2xl font-black text-xs uppercase outline-none" value={selectedCategory} onChange={e => setSelectedCategory(e.target.value)}>
-             <option value="all">All Categories</option>
-             {categories.map(c => <option key={c.id} value={c.slug}>{c.name}</option>)}
-          </select>
-          <div className="flex bg-slate-50 rounded-2xl p-1">
-            <button onClick={() => setViewMode('grid')} className={`p-2 rounded-xl transition-all ${viewMode === 'grid' ? 'bg-white text-primary shadow-sm' : 'text-slate-400'}`}><LayoutGrid size={18}/></button>
-            <button onClick={() => setViewMode('table')} className={`p-2 rounded-xl transition-all ${viewMode === 'table' ? 'bg-white text-primary shadow-sm' : 'text-slate-400'}`}><ListIcon size={18}/></button>
-          </div>
-        </div>
-      </div>
-
-      {filteredProducts.length === 0 ? (
-        <div className="bg-white py-20 rounded-[40px] border-2 border-dashed border-slate-100 flex flex-col items-center justify-center text-center">
-          <div className="w-20 h-20 bg-slate-50 rounded-full flex items-center justify-center text-slate-300 mb-4">
-            <Package size={40} />
-          </div>
-          <h3 className="text-xl font-black text-slate-800 mb-2">কোনো পণ্য পাওয়া যায়নি</h3>
-          <p className="text-slate-400 font-bold text-sm max-w-xs">আপনার ইনভেন্টরিতে কোনো পণ্য নেই অথবা সার্চের সাথে মিলছে না।</p>
-          <button onClick={() => { setEditingId(null); setShowModal(true); }} className="mt-6 bg-primary text-white px-8 py-3 rounded-2xl font-black text-xs uppercase tracking-widest shadow-xl shadow-primary/20">নতুন পণ্য যোগ করুন</button>
-        </div>
-      ) : viewMode === 'grid' ? (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
-          {filteredProducts.map(p => {
-            const status = getStockStatus(p.stock, p.minStock || 5);
-            return (
-              <div key={p.id} className="bg-white rounded-[40px] border-2 border-slate-100 overflow-hidden hover:shadow-2xl hover:shadow-slate-200 transition-all group">
-                <div className="aspect-square relative overflow-hidden bg-slate-50">
-                  {p.imageUrl ? (
-                    <img src={p.imageUrl} alt={p.name} className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-500" />
-                  ) : (
-                    <div className="w-full h-full flex items-center justify-center text-slate-300">
-                      <Package size={48} />
-                    </div>
-                  )}
-                  <div className="absolute top-4 left-4">
-                    <span className={`px-4 py-1.5 rounded-full text-[10px] font-black uppercase tracking-widest border-2 ${status.color}`}>
-                      {status.label}
-                    </span>
-                  </div>
-                  <div className="absolute top-4 right-4 flex flex-col gap-2 translate-x-12 group-hover:translate-x-0 transition-transform duration-300">
-                    <button onClick={() => { setEditingId(p.id); setFormData(p); setShowModal(true); }} className="w-10 h-10 bg-white rounded-2xl flex items-center justify-center text-slate-600 shadow-xl hover:bg-primary hover:text-white transition-all">
-                      <Edit size={18} />
-                    </button>
-                    <button onClick={() => { if(window.confirm('পণ্যটি মুছে ফেলতে চান?')) { if(onDelete && p.id) onDelete(p.id); onUpdate(products.filter(x => x.id !== p.id)); } }} className="w-10 h-10 bg-white rounded-2xl flex items-center justify-center text-rose-500 shadow-xl hover:bg-rose-500 hover:text-white transition-all">
-                      <Trash2 size={18} />
-                    </button>
-                  </div>
-                </div>
-                <div className="p-6 space-y-4">
-                  <div>
-                    <p className="text-[10px] font-black text-primary uppercase tracking-widest mb-1">{p.category}</p>
-                    <h4 className="font-black text-slate-800 line-clamp-1">{p.name}</h4>
-                    <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">SKU: {p.sku || 'N/A'}</p>
-                  </div>
-                  <div className="grid grid-cols-2 gap-4 pt-4 border-t border-slate-50">
+              <h3 className="text-xl font-black text-slate-700">কোনো আইটেম পাওয়া যায়নি</h3>
+              <p className="text-xs font-bold text-slate-400 mt-1 max-w-sm mx-auto">
+                {activeTab === 'raw_materials' 
+                  ? 'নতুন কাঁচামাল যোগ করুন অথবা সাপ্লায়ার থেকে কাঁচামাল ক্রয় করুন।' 
+                  : 'নতুন উৎপাদিত পণ্য যোগ করুন অথবা উৎপাদন ব্যাচ তৈরি করুন।'}
+              </p>
+              <button 
+                onClick={() => openAddModal(activeTab === 'raw_materials' ? 'raw_material' : 'finished_good')}
+                className="mt-6 bg-primary text-white px-8 py-3.5 rounded-2xl font-black text-xs uppercase tracking-widest shadow-xl shadow-primary/20 active:scale-95 transition-all"
+              >
+                + নতুন আইটেম যুক্ত করুন
+              </button>
+            </div>
+          ) : viewMode === 'grid' ? (
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6">
+              {displayedItems.map(p => {
+                const isRaw = p.productType === 'raw_material';
+                const isLow = (Number(p.stock) || 0) <= (Number(p.minStock) || 5);
+                return (
+                  <div 
+                    key={p.id} 
+                    className="bg-white rounded-[32px] p-6 border-2 border-slate-50 shadow-sm hover:shadow-xl hover:border-primary/20 transition-all group flex flex-col justify-between"
+                  >
                     <div>
-                      <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Sale Price</p>
-                      <p className="text-lg font-black text-slate-800">৳{p.salePrice}</p>
+                      {/* Product Image / Icon Banner */}
+                      <div className="aspect-square bg-slate-50 rounded-2xl mb-4 overflow-hidden relative flex items-center justify-center group-hover:scale-[1.02] transition-transform">
+                        {p.imageUrl ? (
+                          <img src={p.imageUrl} alt={p.name} className="w-full h-full object-contain p-2" />
+                        ) : (
+                          <div className={`p-6 rounded-3xl ${isRaw ? 'bg-amber-100 text-amber-600' : 'bg-primary/10 text-primary'}`}>
+                            {isRaw ? <Layers size={40}/> : <Package size={40}/>}
+                          </div>
+                        )}
+                        <div className="absolute top-3 left-3">
+                          <span className={`px-3 py-1 rounded-full text-[9px] font-black uppercase tracking-wider shadow-sm ${isRaw ? 'bg-amber-500 text-white' : 'bg-indigo-600 text-white'}`}>
+                            {isRaw ? '🌾 কাঁচামাল' : '📦 রেডি পণ্য'}
+                          </span>
+                        </div>
+                        {isLow && (
+                          <div className="absolute top-3 right-3">
+                            <span className="bg-rose-500 text-white px-2.5 py-1 rounded-full text-[9px] font-black uppercase tracking-wider flex items-center gap-1 shadow-sm animate-pulse">
+                              <AlertTriangle size={10}/> লো স্টক
+                            </span>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Info */}
+                      <div className="space-y-2">
+                        <div className="flex justify-between items-start">
+                          <h4 className="font-black text-slate-800 text-base line-clamp-1 group-hover:text-primary transition-colors">{p.name}</h4>
+                        </div>
+                        <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+                          ক্যাটাগরি: <span className="text-slate-600 font-black">{p.category || p.rawMaterialCategory || 'সাধারণ'}</span>
+                        </p>
+                        {p.sku && (
+                          <p className="text-[9px] font-black text-slate-400 bg-slate-50 w-fit px-2 py-0.5 rounded-md uppercase">
+                            SKU: {p.sku}
+                          </p>
+                        )}
+                      </div>
+
+                      {/* Pricing Details */}
+                      <div className="mt-4 pt-4 border-t border-slate-100 grid grid-cols-2 gap-2 text-xs">
+                        <div className="bg-slate-50 p-2.5 rounded-xl">
+                          <span className="text-[9px] font-black text-slate-400 uppercase block">ক্রয়/উৎপাদন খরচ</span>
+                          <span className="font-black text-slate-800">৳{(p.purchasePrice || 0).toLocaleString()}</span>
+                          <span className="text-[9px] font-bold text-slate-400 ml-1">/{p.unit}</span>
+                        </div>
+
+                        {!isRaw ? (
+                          <div className="bg-primary/5 p-2.5 rounded-xl">
+                            <span className="text-[9px] font-black text-primary uppercase block">বিক্রয় মূল্য</span>
+                            <span className="font-black text-primary">৳{(p.salePrice || 0).toLocaleString()}</span>
+                          </div>
+                        ) : (
+                          <div className="bg-amber-50 p-2.5 rounded-xl">
+                            <span className="text-[9px] font-black text-amber-600 uppercase block">মজুদ ভ্যালু</span>
+                            <span className="font-black text-amber-700">৳{((p.stock || 0) * (p.purchasePrice || 0)).toLocaleString()}</span>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Stock Badge */}
+                      <div className="mt-3 flex items-center justify-between bg-slate-50 p-3 rounded-2xl">
+                        <span className="text-[10px] font-black text-slate-400 uppercase">বর্তমান মজুদ:</span>
+                        <span className={`text-sm font-black ${isLow ? 'text-rose-600' : 'text-emerald-700'}`}>
+                          {p.stock} <span className="text-[10px] font-bold text-slate-500 uppercase">{p.unit}</span>
+                        </span>
+                      </div>
                     </div>
-                    <div className="text-right">
-                      <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Current Stock</p>
-                      <p className="text-lg font-black text-slate-800">{p.stock} <span className="text-[10px] font-bold opacity-50">{p.unit}</span></p>
-                      <p className="text-[10px] font-black text-emerald-600 mt-1 uppercase tracking-tighter">Value: ৳{(p.stock * (p.purchasePrice || 0)).toLocaleString()}</p>
+
+                    {/* Actions */}
+                    <div className="mt-6 pt-4 border-t border-slate-100 flex items-center justify-between gap-2">
+                      <button 
+                        onClick={() => openEditModal(p)}
+                        className="flex-1 bg-slate-100 hover:bg-slate-200 text-slate-700 py-2.5 rounded-xl font-black text-[10px] uppercase tracking-wider transition-all flex items-center justify-center gap-1.5"
+                      >
+                        <Edit size={14}/> এডিট
+                      </button>
+                      {onDelete && (
+                        <button 
+                          onClick={() => {
+                            if (window.confirm(`আপনি কি নিশ্চিত "${p.name}" মুছে ফেলতে চান?`)) {
+                              onDelete(p.id);
+                            }
+                          }}
+                          className="p-2.5 bg-rose-50 hover:bg-rose-100 text-rose-600 rounded-xl transition-all"
+                          title="মুছে ফেলুন"
+                        >
+                          <Trash2 size={16}/>
+                        </button>
+                      )}
                     </div>
                   </div>
-                  
-                  {/* Detailed Stock Stats */}
-                  <div className="grid grid-cols-2 gap-2 pt-2 border-t border-slate-50">
-                    <div className="bg-slate-50/50 p-2 rounded-xl">
-                      <p className="text-[7px] font-black text-slate-400 uppercase tracking-widest leading-none mb-1">Today</p>
-                      <p className="text-[10px] font-black text-slate-700">{productStockStats[p.id]?.today || 0} U / ৳{(productStockStats[p.id]?.todayValue || 0).toLocaleString()}</p>
-                    </div>
-                    <div className="bg-slate-50/50 p-2 rounded-xl">
-                      <p className="text-[7px] font-black text-slate-400 uppercase tracking-widest leading-none mb-1">Month</p>
-                      <p className="text-[10px] font-black text-slate-700">{productStockStats[p.id]?.month || 0} U / ৳{(productStockStats[p.id]?.monthValue || 0).toLocaleString()}</p>
-                    </div>
-                    <div className="bg-slate-50/50 p-2 rounded-xl">
-                      <p className="text-[7px] font-black text-slate-400 uppercase tracking-widest leading-none mb-1">Year</p>
-                      <p className="text-[10px] font-black text-slate-700">{productStockStats[p.id]?.year || 0} U / ৳{(productStockStats[p.id]?.yearValue || 0).toLocaleString()}</p>
-                    </div>
-                    <div className="bg-slate-50/50 p-2 rounded-xl">
-                      <p className="text-[7px] font-black text-slate-400 uppercase tracking-widest leading-none mb-1">Lifetime</p>
-                      <p className="text-[10px] font-black text-slate-700">{productStockStats[p.id]?.lifetime || 0} U / ৳{(productStockStats[p.id]?.lifetimeValue || 0).toLocaleString()}</p>
-                    </div>
-                  </div>
-                </div>
+                );
+              })}
+            </div>
+          ) : (
+            <div className="bg-white rounded-[36px] border-2 border-slate-50 overflow-hidden shadow-sm">
+              <div className="overflow-x-auto">
+                <table className="w-full text-left border-collapse">
+                  <thead>
+                    <tr className="bg-slate-50/80 border-b border-slate-100 text-[10px] font-black text-slate-400 uppercase tracking-widest">
+                      <th className="p-5">আইটেম ও ছবি</th>
+                      <th className="p-5">টাইপ</th>
+                      <th className="p-5">ক্যাটাগরি</th>
+                      <th className="p-5">ক্রয়/উৎপাদন দর</th>
+                      {activeTab === 'finished_goods' && <th className="p-5">বিক্রয় মূল্য</th>}
+                      <th className="p-5">বর্তমান মজুদ</th>
+                      <th className="p-5">মোট মজুদ ভ্যালু</th>
+                      <th className="p-5 text-right">অ্যাকশন</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-50 text-sm">
+                    {displayedItems.map(p => {
+                      const isRaw = p.productType === 'raw_material';
+                      const isLow = (Number(p.stock) || 0) <= (Number(p.minStock) || 5);
+                      return (
+                        <tr key={p.id} className="hover:bg-slate-50/50 transition-colors">
+                          <td className="p-5">
+                            <div className="flex items-center gap-3">
+                              <div className="w-10 h-10 bg-slate-100 rounded-xl overflow-hidden flex items-center justify-center shrink-0">
+                                {p.imageUrl ? (
+                                  <img src={p.imageUrl} alt={p.name} className="w-full h-full object-cover" />
+                                ) : (
+                                  isRaw ? <Layers size={18} className="text-amber-600"/> : <Package size={18} className="text-primary"/>
+                                )}
+                              </div>
+                              <div>
+                                <span className="font-black text-slate-800 block">{p.name}</span>
+                                {p.sku && <span className="text-[10px] font-bold text-slate-400">SKU: {p.sku}</span>}
+                              </div>
+                            </div>
+                          </td>
+                          <td className="p-5">
+                            <span className={`px-2.5 py-1 rounded-full text-[9px] font-black uppercase ${isRaw ? 'bg-amber-100 text-amber-700' : 'bg-indigo-100 text-indigo-700'}`}>
+                              {isRaw ? 'কাঁচামাল' : 'রেডি পণ্য'}
+                            </span>
+                          </td>
+                          <td className="p-5 font-bold text-slate-600 text-xs">{p.category || p.rawMaterialCategory || 'সাধারণ'}</td>
+                          <td className="p-5 font-black text-slate-800">৳{(p.purchasePrice || 0).toLocaleString()} <span className="text-[10px] text-slate-400 font-bold">/{p.unit}</span></td>
+                          {activeTab === 'finished_goods' && (
+                            <td className="p-5 font-black text-primary">৳{(p.salePrice || 0).toLocaleString()}</td>
+                          )}
+                          <td className="p-5">
+                            <span className={`font-black ${isLow ? 'text-rose-600' : 'text-emerald-700'}`}>
+                              {p.stock} {p.unit}
+                            </span>
+                          </td>
+                          <td className="p-5 font-black text-slate-800">৳{((p.stock || 0) * (p.purchasePrice || 0)).toLocaleString()}</td>
+                          <td className="p-5 text-right">
+                            <div className="flex items-center justify-end gap-2">
+                              <button onClick={() => openEditModal(p)} className="p-2 hover:bg-slate-100 text-slate-600 rounded-xl transition-all"><Edit size={16}/></button>
+                              {onDelete && (
+                                <button onClick={() => window.confirm(`"${p.name}" মুছবেন?`) && onDelete(p.id)} className="p-2 hover:bg-rose-50 text-rose-500 rounded-xl transition-all"><Trash2 size={16}/></button>
+                              )}
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
               </div>
-            );
-          })}
-        </div>
-      ) : (
-        <div className="bg-white rounded-[40px] border-2 border-slate-100 overflow-hidden shadow-sm">
+            </div>
+          )}
+        </>
+      )}
+
+      {/* TAB 3: Production Batches History */}
+      {activeTab === 'production_batches' && (
+        <div className="bg-white rounded-[36px] border-2 border-slate-50 overflow-hidden shadow-sm">
+          <div className="p-8 border-b border-slate-50 flex justify-between items-center bg-slate-50/40">
+            <div>
+              <h3 className="font-black text-slate-800 text-lg uppercase tracking-tight flex items-center gap-2">
+                <Factory size={22} className="text-indigo-600"/> উৎপাদন ব্যাচ ও রূপান্তর ইতিহাস
+              </h3>
+              <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mt-1">কাঁচামাল খরচ করে প্রস্তুতকৃত পণ্যসমূহের লগ</p>
+            </div>
+            <button 
+              onClick={() => setShowBatchModal(true)}
+              className="bg-indigo-600 text-white px-5 py-3 rounded-2xl font-black text-xs uppercase tracking-widest shadow-lg shadow-indigo-600/20 active:scale-95 transition-all flex items-center gap-2"
+            >
+              <Plus size={16}/> নতুন ব্যাচ রূপান্তর
+            </button>
+          </div>
+
           <div className="overflow-x-auto">
             <table className="w-full text-left border-collapse">
               <thead>
-                <tr className="bg-slate-50 border-b-2 border-slate-100">
-                  <th className="px-8 py-6 text-[10px] font-black text-slate-400 uppercase tracking-widest">Product</th>
-                  <th className="px-6 py-6 text-[10px] font-black text-slate-400 uppercase tracking-widest">Category</th>
-                  <th className="px-6 py-6 text-[10px] font-black text-slate-400 uppercase tracking-widest">Stock</th>
-                  <th className="px-6 py-6 text-[10px] font-black text-slate-400 uppercase tracking-widest">Pricing</th>
-                  <th className="px-6 py-6 text-[10px] font-black text-slate-400 uppercase tracking-widest">Status</th>
-                  <th className="px-8 py-6 text-[10px] font-black text-slate-400 uppercase tracking-widest text-right">Actions</th>
+                <tr className="bg-slate-50/80 border-b border-slate-100 text-[10px] font-black text-slate-400 uppercase tracking-widest">
+                  <th className="p-5">ব্যাচ নং ও তারিখ</th>
+                  <th className="p-5">উৎপাদিত পণ্য</th>
+                  <th className="p-5">ব্যবহৃত কাঁচামাল</th>
+                  <th className="p-5">কাঁচামাল খরচ</th>
+                  <th className="p-5">মজুরি/অন্যান্য</th>
+                  <th className="p-5">মোট ব্যাচ খরচ</th>
+                  <th className="p-5">ইউনিট উৎপাদন দর</th>
+                  <th className="p-5 text-right">অ্যাকশন</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-slate-50">
-                {filteredProducts.map(p => {
-                  const status = getStockStatus(p.stock, p.minStock || 5);
-                  return (
-                    <tr key={p.id} className="hover:bg-slate-50/50 transition-colors group">
-                      <td className="px-8 py-4">
-                        <div className="flex items-center gap-4">
-                          <div className="w-12 h-12 rounded-2xl bg-slate-100 overflow-hidden flex-shrink-0">
-                            {p.imageUrl ? (
-                              <img src={p.imageUrl} alt="" className="w-full h-full object-cover" />
-                            ) : (
-                              <div className="w-full h-full flex items-center justify-center text-slate-300"><Package size={20}/></div>
-                            )}
-                          </div>
-                          <div>
-                            <p className="font-black text-slate-800 text-sm">{p.name}</p>
-                            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">SKU: {p.sku || 'N/A'}</p>
-                          </div>
-                        </div>
-                      </td>
-                      <td className="px-6 py-4">
-                        <span className="px-3 py-1 bg-slate-100 rounded-full text-[10px] font-black text-slate-500 uppercase tracking-widest">{p.category}</span>
-                      </td>
-                      <td className="px-6 py-4">
-                        <p className="font-black text-slate-800 text-sm">{p.stock} <span className="text-[10px] opacity-50">{p.unit}</span></p>
-                        <p className="text-[10px] font-black text-emerald-600 uppercase tracking-tighter mt-0.5">Value: ৳{(p.stock * (p.purchasePrice || 0)).toLocaleString()}</p>
-                        <div className="mt-2 grid grid-cols-2 gap-x-4 gap-y-1">
-                          <p className="text-[8px] font-black text-slate-400 uppercase">T: {productStockStats[p.id]?.today || 0}U / ৳{(productStockStats[p.id]?.todayValue || 0).toLocaleString()}</p>
-                          <p className="text-[8px] font-black text-slate-400 uppercase">M: {productStockStats[p.id]?.month || 0}U / ৳{(productStockStats[p.id]?.monthValue || 0).toLocaleString()}</p>
-                          <p className="text-[8px] font-black text-slate-400 uppercase">Y: {productStockStats[p.id]?.year || 0}U / ৳{(productStockStats[p.id]?.yearValue || 0).toLocaleString()}</p>
-                          <p className="text-[8px] font-black text-slate-400 uppercase">L: {productStockStats[p.id]?.lifetime || 0}U / ৳{(productStockStats[p.id]?.lifetimeValue || 0).toLocaleString()}</p>
-                        </div>
-                        <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-1">Min: {p.minStock}</p>
-                      </td>
-                      <td className="px-6 py-4">
-                        <div className="space-y-1">
-                          <p className="text-sm font-black text-slate-800">Sale: ৳{p.salePrice}</p>
-                          <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Buy: ৳{p.purchasePrice}</p>
-                        </div>
-                      </td>
-                      <td className="px-6 py-4">
-                        <span className={`px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-widest border ${status.color}`}>
-                          {status.label}
-                        </span>
-                      </td>
-                      <td className="px-8 py-4 text-right">
-                        <div className="flex justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                          <button onClick={() => { setEditingId(p.id); setFormData(p); setShowModal(true); }} className="p-2 text-slate-400 hover:text-primary transition-colors"><Edit size={18}/></button>
-                          <button onClick={() => { if(window.confirm('পণ্যটি মুছে ফেলতে চান?')) { if(onDelete && p.id) onDelete(p.id); onUpdate(products.filter(x => x.id !== p.id)); } }} className="p-2 text-slate-400 hover:text-rose-500 transition-colors"><Trash2 size={18}/></button>
-                        </div>
-                      </td>
-                    </tr>
-                  );
-                })}
+              <tbody className="divide-y divide-slate-50 text-sm">
+                {productionBatches.map(batch => (
+                  <tr key={batch.id} className="hover:bg-slate-50/50 transition-colors">
+                    <td className="p-5">
+                      <span className="font-black text-indigo-600 uppercase block">{batch.batchNo}</span>
+                      <span className="text-[10px] font-bold text-slate-400">{batch.date}</span>
+                    </td>
+                    <td className="p-5">
+                      <span className="font-black text-slate-800 block">{batch.producedProductName}</span>
+                      <span className="text-xs font-black text-emerald-700">+{batch.producedQuantity} {batch.unit}</span>
+                    </td>
+                    <td className="p-5">
+                      <div className="flex flex-wrap gap-1.5 max-w-xs">
+                        {batch.rawMaterialsUsed?.map((mat, idx) => (
+                          <span key={idx} className="bg-amber-50 text-amber-800 border border-amber-200 px-2 py-0.5 rounded-lg text-[10px] font-bold">
+                            {mat.rawMaterialName} ({mat.quantity} {mat.unit})
+                          </span>
+                        ))}
+                      </div>
+                    </td>
+                    <td className="p-5 font-black text-slate-800">৳{(batch.totalRawMaterialCost || 0).toLocaleString()}</td>
+                    <td className="p-5 font-bold text-slate-600">৳{((batch.laborCost || 0) + (batch.otherCost || 0)).toLocaleString()}</td>
+                    <td className="p-5 font-black text-indigo-700">৳{(batch.totalBatchCost || 0).toLocaleString()}</td>
+                    <td className="p-5 font-black text-emerald-700">৳{(batch.unitProductionCost || 0).toLocaleString()}/{batch.unit}</td>
+                    <td className="p-5 text-right">
+                      {onDeleteProductionBatch && (
+                        <button 
+                          onClick={() => window.confirm(`ব্যাচ #${batch.batchNo} মুছে ফেলতে চান?`) && onDeleteProductionBatch(batch.id)}
+                          className="p-2 hover:bg-rose-50 text-rose-500 rounded-xl transition-all"
+                          title="ব্যাচ মুছুন"
+                        >
+                          <Trash2 size={16}/>
+                        </button>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+
+                {productionBatches.length === 0 && (
+                  <tr>
+                    <td colSpan={8} className="p-16 text-center text-slate-400 font-bold text-xs">
+                      এখনো কোনো উৎপাদন ব্যাচ রেকর্ড করা হয়নি। "নতুন ব্যাচ রূপান্তর" বাটনে ক্লিক করে তৈরি করুন।
+                    </td>
+                  </tr>
+                )}
               </tbody>
             </table>
           </div>
         </div>
       )}
 
-      {/* Recent Stock Additions History */}
-      <div className="bg-white rounded-[40px] border-2 border-slate-100 overflow-hidden shadow-sm mt-8">
-        <div className="p-8 border-b border-slate-50 flex justify-between items-center bg-slate-50/30">
-          <div>
-            <h3 className="font-black text-slate-800 text-lg uppercase tracking-tight flex items-center gap-3">
-              <History size={24} className="text-primary"/> Recent Stock History
-            </h3>
-            <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mt-1">সর্বশেষ স্টক যোগ করার ইতিহাস</p>
+      {/* TAB 4: Stock History */}
+      {activeTab === 'stock_history' && (
+        <div className="bg-white rounded-[36px] border-2 border-slate-50 overflow-hidden shadow-sm">
+          <div className="p-8 border-b border-slate-50 flex justify-between items-center bg-slate-50/40">
+            <div>
+              <h3 className="font-black text-slate-800 text-lg uppercase tracking-tight flex items-center gap-2">
+                <History size={22} className="text-primary"/> দৈনিক স্টক এন্ট্রি ও সাপ্লায়ার ক্রয় লগ
+              </h3>
+              <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mt-1">স্টক সমন্বয় ও ক্রয়ের বিস্তারিত ইতিহাস</p>
+            </div>
+            <button 
+              onClick={() => setShowStockModal(true)}
+              className="bg-emerald-600 text-white px-5 py-3 rounded-2xl font-black text-xs uppercase tracking-widest shadow-lg shadow-emerald-600/20 active:scale-95 transition-all flex items-center gap-2"
+            >
+              <Plus size={16}/> দৈনিক স্টক যোগ
+            </button>
+          </div>
+
+          <div className="overflow-x-auto">
+            <table className="w-full text-left border-collapse">
+              <thead>
+                <tr className="bg-slate-50/80 border-b border-slate-100 text-[10px] font-black text-slate-400 uppercase tracking-widest">
+                  <th className="p-5">তারিখ</th>
+                  <th className="p-5">পণ্যের নাম</th>
+                  <th className="p-5">ধরণ</th>
+                  <th className="p-5">পরিমাণ</th>
+                  <th className="p-5">এন্ট্রি ধরণ</th>
+                  <th className="p-5">মন্তব্য / নোট</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-50 text-sm">
+                {stockEntries.map(entry => (
+                  <tr key={entry.id} className="hover:bg-slate-50/50 transition-colors">
+                    <td className="p-5 font-bold text-slate-500 text-xs">{entry.date}</td>
+                    <td className="p-5 font-black text-slate-800">{entry.productName}</td>
+                    <td className="p-5">
+                      <span className={`px-2 py-0.5 rounded-full text-[9px] font-black uppercase ${entry.productType === 'raw_material' ? 'bg-amber-100 text-amber-700' : 'bg-indigo-100 text-indigo-700'}`}>
+                        {entry.productType === 'raw_material' ? 'কাঁচামাল' : 'রেডি পণ্য'}
+                      </span>
+                    </td>
+                    <td className="p-5 font-black text-emerald-700">+{entry.quantity} {entry.unit || 'pcs'}</td>
+                    <td className="p-5 font-bold text-slate-600 text-xs">
+                      {entry.entryType === 'production_output' ? '⚙️ উৎপাদন আউটপুট' : '📦 ম্যানুয়াল স্টক ইন'}
+                    </td>
+                    <td className="p-5 text-slate-400 text-xs">{entry.note || '—'}</td>
+                  </tr>
+                ))}
+                {stockEntries.length === 0 && (
+                  <tr>
+                    <td colSpan={6} className="p-16 text-center text-slate-400 font-bold text-xs">
+                      কোনো স্টক এন্ট্রি হিস্ট্রি পাওয়া যায়নি।
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
           </div>
         </div>
-        <div className="overflow-x-auto">
-          <table className="w-full text-left border-collapse">
-            <thead>
-              <tr className="bg-slate-50/50">
-                <th className="p-6 text-[10px] font-black text-slate-400 uppercase tracking-widest border-b border-slate-100">Date & No</th>
-                <th className="p-6 text-[10px] font-black text-slate-400 uppercase tracking-widest border-b border-slate-100">Product Analysis</th>
-                <th className="p-6 text-[10px] font-black text-slate-400 uppercase tracking-widest border-b border-slate-100">Quantity</th>
-                <th className="p-6 text-[10px] font-black text-slate-400 uppercase tracking-widest border-b border-slate-100">Total Cost</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-50">
-              {purchases.slice(0, 10).map(pur => (
-                <tr key={pur.id} className="hover:bg-slate-50/30 transition-colors">
-                  <td className="p-6">
-                    <div className="text-xs font-black text-slate-800 uppercase">{pur.purchaseNo}</div>
-                    <div className="text-[10px] font-bold text-slate-400 uppercase tracking-tighter mt-0.5">{pur.date}</div>
-                  </td>
-                  <td className="p-6">
-                    <div className="flex flex-wrap gap-2">
-                      {pur.items.map((item, idx) => (
-                        <div key={idx} className="bg-slate-100 px-3 py-1.5 rounded-xl text-[9px] font-black text-slate-600 border border-slate-200">
-                          {item.productName} (x{item.quantity})
-                        </div>
-                      ))}
-                    </div>
-                  </td>
-                  <td className="p-6">
-                    <div className="text-sm font-black text-slate-800">
-                      {pur.items.reduce((s, i) => s + i.quantity, 0)} <span className="text-[10px] font-bold text-slate-400 uppercase ml-1">Items</span>
-                    </div>
-                  </td>
-                  <td className="p-6">
-                    <div className="text-sm font-black text-emerald-700">৳{pur.total.toLocaleString()}</div>
-                  </td>
-                </tr>
-              ))}
-              {purchases.length === 0 && (
-                <tr>
-                  <td colSpan={4} className="p-12 text-center text-slate-300 font-black uppercase text-[10px] tracking-widest">No stock addition history found</td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </div>
-      </div>
+      )}
 
-      {/* Product Add/Edit Modal */}
+      {/* MODAL 1: Product / Raw Material Add & Edit */}
       {showModal && (
-        <div className="fixed inset-0 bg-primary/40 backdrop-blur-md z-[100] flex items-center justify-center p-0 sm:p-4 overflow-hidden modal-container">
-          <div className="bg-white rounded-none sm:rounded-[48px] w-full h-full sm:max-w-4xl sm:max-h-[92vh] p-8 sm:p-12 shadow-2xl animate-in zoom-in duration-300 border-2 border-white/20 modal-content-full overflow-y-auto custom-scrollbar">
-            <div className="flex justify-between items-center mb-10 shrink-0">
-              <h3 className="text-2xl font-black text-slate-900 uppercase tracking-tight flex items-center gap-4">
-                 <div className="bg-primary p-3 rounded-2xl text-white shadow-lg"><Package size={24}/></div>
-                 {editingId ? 'পণ্য আপডেট করুন' : 'নতুন পণ্য যোগ করুন'}
-              </h3>
-              <button onClick={() => setShowModal(false)} className="text-slate-400 hover:text-rose-600 transition-colors"><X size={36}/></button>
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-md z-[100] flex items-center justify-center p-4 overflow-y-auto custom-scrollbar">
+          <motion.div initial={{ scale: 0.95, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} className="bg-white rounded-[40px] w-full max-w-3xl p-8 sm:p-10 shadow-2xl my-8">
+            <div className="flex justify-between items-center mb-6 pb-4 border-b border-slate-100">
+              <div className="flex items-center gap-3">
+                <div className={`p-3 rounded-2xl text-white ${formData.productType === 'raw_material' ? 'bg-amber-500' : 'bg-primary'}`}>
+                  {formData.productType === 'raw_material' ? <Layers size={24}/> : <Package size={24}/>}
+                </div>
+                <div>
+                  <h3 className="text-xl font-black text-slate-900 uppercase">
+                    {editingId ? (formData.productType === 'raw_material' ? 'কাঁচামাল আপডেট' : 'পণ্য আপডেট') : (formData.productType === 'raw_material' ? 'নতুন কাঁচামাল যোগ' : 'নতুন উৎপাদিত পণ্য যোগ')}
+                  </h3>
+                  <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-0.5">মজুদ বিবরণী ফরম</p>
+                </div>
+              </div>
+              <button onClick={() => setShowModal(false)} className="text-slate-400 hover:text-rose-500 p-2 rounded-xl transition-colors"><X size={24}/></button>
             </div>
-            
-            <form onSubmit={handleSubmit} className="space-y-8">
-              <div className="grid grid-cols-1 md:grid-cols-12 gap-10">
-                {/* Left: Image and SKU */}
-                <div className="md:col-span-4 space-y-6">
-                  <div className="aspect-square bg-slate-50 rounded-[40px] border-4 border-dashed border-slate-200 flex flex-col items-center justify-center relative overflow-hidden group">
-                    {formData.imageUrl ? (
-                      <>
-                        <img 
-                          src={formData.imageUrl} 
-                          className="w-full h-full object-contain p-6" 
-                        />
-                        <button type="button" onClick={() => setFormData({...formData, imageUrl: ''})} className="absolute top-4 right-4 p-3 bg-rose-500 text-white rounded-2xl opacity-0 group-hover:opacity-100 transition-opacity"><Trash2 size={20}/></button>
-                      </>
-                    ) : (
-                      <div className="text-center p-8 w-full">
-                        {isUploading ? (
-                          <div className="flex flex-col items-center">
-                            <Loader2 size={48} className="animate-spin text-primary mb-4" />
-                            <p className="text-[10px] font-black text-primary uppercase tracking-widest">আপলোড হচ্ছে...</p>
-                          </div>
-                        ) : (
-                          <>
-                            <Upload size={48} className="text-slate-300 mx-auto mb-4" />
-                            <p className="text-xs font-black text-slate-400 uppercase tracking-widest leading-relaxed">পণ্যর ছবি আপলোড করুন</p>
-                            <input type="file" ref={fileInputRef} onChange={handleUpload} className="hidden" accept="image/*" />
-                            <div className="flex flex-col gap-2 mt-4">
-                              <button type="button" onClick={() => fileInputRef.current?.click()} className="bg-white border-2 border-slate-200 px-6 py-2.5 rounded-xl font-black text-[10px] uppercase shadow-sm hover:bg-slate-50 transition-colors">ফাইল নির্বাচন করুন</button>
-                              <div className="flex items-center gap-2 my-2">
-                                <div className="h-[1px] flex-1 bg-slate-100"></div>
-                                <span className="text-[8px] font-black text-slate-300 uppercase">অথবা</span>
-                                <div className="h-[1px] flex-1 bg-slate-100"></div>
-                              </div>
-                              <input 
-                                type="text" 
-                                placeholder="ছবির লিঙ্ক (URL) দিন" 
-                                className="w-full border-2 border-slate-100 rounded-xl px-4 py-2 text-[10px] font-black bg-white outline-none focus:border-primary/30"
-                                value={formData.imageUrl}
-                                onChange={e => setFormData({...formData, imageUrl: e.target.value})}
-                              />
-                            </div>
-                          </>
-                        )}
-                      </div>
-                    )}
-                  </div>
-                  <div className="space-y-2">
-                    <label className="text-[10px] font-black text-slate-600 uppercase tracking-widest ml-1 block">বারকোড / SKU</label>
-                    <div className="relative">
-                       <Tag className="absolute left-4 top-4 text-slate-400" size={18}/>
-                       <input type="text" className="w-full border-2 border-slate-100 rounded-2xl pl-12 pr-4 py-4 font-black text-sm bg-slate-50 outline-none focus:bg-white focus:ring-4 focus:ring-primary/5 transition-all" placeholder="বারকোড স্ক্যান করুন বা লিখুন" value={formData.sku} onChange={e => setFormData({...formData, sku: e.target.value})} />
-                    </div>
-                  </div>
+
+            <form onSubmit={handleSubmit} className="space-y-6">
+              {/* Type Switcher */}
+              <div className="bg-slate-100 p-1.5 rounded-2xl flex gap-2">
+                <button 
+                  type="button" 
+                  onClick={() => setFormData(prev => ({ ...prev, productType: 'finished_good', unit: prev.unit === 'kg' ? 'pcs' : prev.unit }))}
+                  className={`flex-1 py-3 rounded-xl font-black text-xs uppercase tracking-wider transition-all flex items-center justify-center gap-2 ${formData.productType !== 'raw_material' ? 'bg-white text-primary shadow-sm' : 'text-slate-500'}`}
+                >
+                  <Package size={16}/> 📦 উৎপাদিত / রেডি পণ্য
+                </button>
+                <button 
+                  type="button" 
+                  onClick={() => setFormData(prev => ({ ...prev, productType: 'raw_material', unit: prev.unit === 'pcs' ? 'kg' : prev.unit }))}
+                  className={`flex-1 py-3 rounded-xl font-black text-xs uppercase tracking-wider transition-all flex items-center justify-center gap-2 ${formData.productType === 'raw_material' ? 'bg-amber-500 text-white shadow-sm' : 'text-slate-500'}`}
+                >
+                  <Layers size={16}/> 🌾 কাঁচামাল (Raw Material)
+                </button>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
+                <div className="space-y-2">
+                  <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">
+                    {formData.productType === 'raw_material' ? 'কাঁচামালের নাম *' : 'পণ্যের নাম *'}
+                  </label>
+                  <input 
+                    required 
+                    className="w-full border-2 border-slate-100 rounded-2xl p-4 font-bold text-sm bg-slate-50 outline-none focus:bg-white focus:border-primary/30 transition-all"
+                    placeholder={formData.productType === 'raw_material' ? "যেমন: তুলা, র সুতা, প্লাস্টিক দানা, চিনি..." : "যেমন: টি-শার্ট, জুস, বিস্কুট..."}
+                    value={formData.name}
+                    onChange={e => setFormData({ ...formData, name: e.target.value })}
+                  />
                 </div>
 
-                {/* Right: Details */}
-                <div className="md:col-span-8 space-y-6">
+                <div className="space-y-2">
+                  <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">বারকোড / SKU / কোড</label>
+                  <input 
+                    className="w-full border-2 border-slate-100 rounded-2xl p-4 font-bold text-sm bg-slate-50 outline-none focus:bg-white focus:border-primary/30 transition-all"
+                    placeholder="বারকোড বা আইটেম কোড..."
+                    value={formData.sku || ''}
+                    onChange={e => setFormData({ ...formData, sku: e.target.value })}
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-6">
+                <div className="space-y-2">
+                  <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">ক্যাটাগরি</label>
+                  <select 
+                    className="w-full border-2 border-slate-100 rounded-2xl p-4 font-bold text-sm bg-slate-50 outline-none focus:bg-white cursor-pointer"
+                    value={formData.category}
+                    onChange={e => setFormData({ ...formData, category: e.target.value })}
+                  >
+                    <option value="other">অন্যান্য (General)</option>
+                    {categories.map(c => <option key={c.id} value={c.slug}>{c.name}</option>)}
+                  </select>
+                </div>
+
+                <div className="space-y-2">
+                  <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">একক / পরিমাপক (Unit)</label>
+                  <select 
+                    className="w-full border-2 border-slate-100 rounded-2xl p-4 font-bold text-sm bg-slate-50 outline-none focus:bg-white cursor-pointer"
+                    value={formData.unit}
+                    onChange={e => setFormData({ ...formData, unit: e.target.value as any })}
+                  >
+                    <option value="pcs">Pcs (পিস)</option>
+                    <option value="kg">Kg (কেজি)</option>
+                    <option value="gm">Gm (গ্রাম)</option>
+                    <option value="liter">Liter (লিটার)</option>
+                    <option value="meter">Meter (মিটার)</option>
+                    <option value="bag">Bag (বস্তা)</option>
+                    <option value="box">Box (বক্স)</option>
+                    <option value="pkt">Pkt (প্যাকেট)</option>
+                  </select>
+                </div>
+
+                <div className="space-y-2">
+                  <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">সাপ্লায়ার / সরবরাহকারী</label>
+                  <select 
+                    className="w-full border-2 border-slate-100 rounded-2xl p-4 font-bold text-sm bg-slate-50 outline-none focus:bg-white cursor-pointer"
+                    value={formData.supplierId || ''}
+                    onChange={e => setFormData({ ...formData, supplierId: e.target.value })}
+                  >
+                    <option value="">কোনো নির্দিষ্ট সাপ্লায়ার নেই</option>
+                    {suppliers.map(s => <option key={s.id} value={s.id}>{s.name} ({s.companyName || s.phone})</option>)}
+                  </select>
+                </div>
+              </div>
+
+              {/* Pricing Section */}
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                <div className="bg-rose-50/70 p-4 rounded-2xl border border-rose-100">
+                  <label className="text-[9px] font-black text-rose-500 uppercase tracking-widest mb-1 block">
+                    {formData.productType === 'raw_material' ? 'ক্রয়মূল্য প্রতি ইউনিট (৳) *' : 'ক্রয়/উৎপাদন খরচ (৳)'}
+                  </label>
+                  <input 
+                    type="number"
+                    required
+                    min="0"
+                    step="any"
+                    className="w-full bg-white border-none rounded-xl p-3 font-black text-lg text-rose-700 outline-none"
+                    value={formData.purchasePrice || ''}
+                    onChange={e => setFormData({ ...formData, purchasePrice: parseFloat(e.target.value) || 0 })}
+                  />
+                </div>
+
+                {formData.productType !== 'raw_material' ? (
+                  <>
+                    <div className="bg-blue-50/70 p-4 rounded-2xl border border-blue-100">
+                      <label className="text-[9px] font-black text-blue-500 uppercase tracking-widest mb-1 block">খুচরা বিক্রয় মূল্য (৳) *</label>
+                      <input 
+                        type="number"
+                        required
+                        min="0"
+                        step="any"
+                        className="w-full bg-white border-none rounded-xl p-3 font-black text-lg text-blue-700 outline-none"
+                        value={formData.salePrice || ''}
+                        onChange={e => setFormData({ ...formData, salePrice: parseFloat(e.target.value) || 0 })}
+                      />
+                    </div>
+
+                    <div className="bg-emerald-50/70 p-4 rounded-2xl border border-emerald-100">
+                      <label className="text-[9px] font-black text-emerald-500 uppercase tracking-widest mb-1 block">পাইকারি মূল্য (৳)</label>
+                      <input 
+                        type="number"
+                        min="0"
+                        step="any"
+                        className="w-full bg-white border-none rounded-xl p-3 font-black text-lg text-emerald-700 outline-none"
+                        value={formData.wholesalePrice || ''}
+                        onChange={e => setFormData({ ...formData, wholesalePrice: parseFloat(e.target.value) || 0 })}
+                      />
+                    </div>
+                  </>
+                ) : (
+                  <div className="sm:col-span-2 bg-amber-50/70 p-4 rounded-2xl border border-amber-100 flex flex-col justify-center">
+                    <span className="text-[10px] font-black text-amber-700 uppercase">💡 কাঁচামাল নোট</span>
+                    <p className="text-xs text-amber-900 mt-1 font-bold">
+                      কাঁচামাল সরাসরি বিক্রির জন্য নয়; এটি উৎপাদন ব্যাচে খরচ হবে এবং সাপ্লায়ার থেকে ক্রয় করা হবে।
+                    </p>
+                  </div>
+                )}
+              </div>
+
+              {/* Stock and Min Stock */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
+                <div className="space-y-2">
+                  <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">প্রারম্ভিক / বর্তমান মজুদ</label>
+                  <input 
+                    type="number"
+                    required
+                    min="0"
+                    step="any"
+                    className="w-full border-2 border-slate-100 rounded-2xl p-4 font-black text-lg bg-slate-50 outline-none focus:bg-white"
+                    value={formData.stock || ''}
+                    onChange={e => setFormData({ ...formData, stock: parseFloat(e.target.value) || 0 })}
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">সর্বনিম্ন মজুদ সতর্কতা (Min Alert)</label>
+                  <input 
+                    type="number"
+                    min="0"
+                    className="w-full border-2 border-slate-100 rounded-2xl p-4 font-black text-lg bg-slate-50 outline-none focus:bg-white"
+                    value={formData.minStock || ''}
+                    onChange={e => setFormData({ ...formData, minStock: parseFloat(e.target.value) || 0 })}
+                  />
+                </div>
+              </div>
+
+              <button 
+                type="submit"
+                className="w-full bg-primary text-white py-5 rounded-2xl font-black uppercase text-xs tracking-widest shadow-xl shadow-primary/20 hover:scale-[1.01] active:scale-95 transition-all flex items-center justify-center gap-2"
+              >
+                <Save size={18}/> {editingId ? 'পরিবর্তন সংরক্ষণ করুন' : 'আইটেম যুক্ত করুন'}
+              </button>
+            </form>
+          </motion.div>
+        </div>
+      )}
+
+      {/* MODAL 2: Production Batch Converter (Manufacturing) */}
+      {showBatchModal && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-md z-[110] flex items-center justify-center p-4 overflow-y-auto custom-scrollbar">
+          <motion.div initial={{ scale: 0.95, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} className="bg-white rounded-[40px] w-full max-w-4xl p-8 sm:p-10 shadow-2xl my-8">
+            <div className="flex justify-between items-center mb-6 pb-4 border-b border-slate-100">
+              <div className="flex items-center gap-3">
+                <div className="bg-amber-500 p-3 rounded-2xl text-white shadow-lg shadow-amber-500/20">
+                  <Factory size={24}/>
+                </div>
+                <div>
+                  <h3 className="text-xl font-black text-slate-900 uppercase">নতুন উৎপাদন ব্যাচ তৈরি</h3>
+                  <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-0.5">কাঁচামাল খরচ করে উৎপাদিত পণ্য তৈরি ও স্বয়ংক্রিয় স্টক সমন্বয়</p>
+                </div>
+              </div>
+              <button onClick={() => setShowBatchModal(false)} className="text-slate-400 hover:text-rose-500 p-2 rounded-xl transition-colors"><X size={24}/></button>
+            </div>
+
+            <form onSubmit={handleCreateBatch} className="space-y-8">
+              {/* Output Finished Product */}
+              <div className="bg-indigo-50/50 p-6 rounded-3xl border border-indigo-100 space-y-4">
+                <h4 className="font-black text-indigo-900 text-xs uppercase tracking-widest flex items-center gap-2">
+                  <Package size={16}/> ১. উৎপাদিত ফিনিশড পণ্য নির্বাচন করুন
+                </h4>
+                
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                  <div className="sm:col-span-2 space-y-1">
+                    <label className="text-[9px] font-black text-slate-500 uppercase tracking-widest">টার্গেট রেডি পণ্য *</label>
+                    <select 
+                      required
+                      className="w-full bg-white border-2 border-slate-100 rounded-2xl p-4 font-bold text-sm outline-none focus:border-indigo-500 cursor-pointer"
+                      value={batchForm.producedProductId}
+                      onChange={e => {
+                        const target = finishedGoods.find(f => f.id === e.target.value);
+                        setBatchForm(prev => ({
+                          ...prev,
+                          producedProductId: e.target.value,
+                          unit: target?.unit || prev.unit
+                        }));
+                      }}
+                    >
+                      <option value="">উৎপাদিত পণ্য সিলেক্ট করুন...</option>
+                      {finishedGoods.map(p => (
+                        <option key={p.id} value={p.id}>{p.name} (বর্তমান স্টক: {p.stock} {p.unit})</option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div className="space-y-1">
+                    <label className="text-[9px] font-black text-slate-500 uppercase tracking-widest">উৎপাদিত পরিমাণ *</label>
+                    <input 
+                      type="number"
+                      required
+                      min="1"
+                      className="w-full bg-white border-2 border-slate-100 rounded-2xl p-4 font-black text-base text-indigo-700 outline-none focus:border-indigo-500"
+                      value={batchForm.producedQuantity || ''}
+                      onChange={e => setBatchForm(prev => ({ ...prev, producedQuantity: parseFloat(e.target.value) || 0 }))}
+                      placeholder="পরিমাণ"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* Raw Materials Consumed */}
+              <div className="bg-amber-50/50 p-6 rounded-3xl border border-amber-100 space-y-4">
+                <div className="flex justify-between items-center">
+                  <h4 className="font-black text-amber-900 text-xs uppercase tracking-widest flex items-center gap-2">
+                    <Layers size={16}/> ২. ব্যবহৃত কাঁচামালসমূহ যোগ করুন
+                  </h4>
+                  <button 
+                    type="button"
+                    onClick={() => setBatchForm(prev => ({
+                      ...prev,
+                      rawMaterials: [...prev.rawMaterials, { rawMaterialId: '', quantity: 1 }]
+                    }))}
+                    className="bg-amber-500 hover:bg-amber-600 text-white px-3.5 py-1.5 rounded-xl font-black text-[10px] uppercase tracking-wider flex items-center gap-1 transition-all"
+                  >
+                    <Plus size={14}/> আরও কাঁচামাল যোগ
+                  </button>
+                </div>
+
+                {batchForm.rawMaterials.map((item, index) => {
+                  const raw = rawMaterials.find(r => r.id === item.rawMaterialId);
+                  const lineCost = (Number(item.quantity) || 0) * (Number(raw?.purchasePrice) || 0);
+                  const isStockShort = raw && Number(item.quantity) > Number(raw.stock);
+
+                  return (
+                    <div key={index} className="bg-white p-4 rounded-2xl border border-amber-200/60 grid grid-cols-1 sm:grid-cols-12 gap-3 items-center">
+                      <div className="sm:col-span-5 space-y-1">
+                        <select 
+                          required
+                          className="w-full border-2 border-slate-100 rounded-xl p-3 font-bold text-xs bg-slate-50 outline-none cursor-pointer"
+                          value={item.rawMaterialId}
+                          onChange={e => {
+                            const newMat = [...batchForm.rawMaterials];
+                            newMat[index].rawMaterialId = e.target.value;
+                            setBatchForm(prev => ({ ...prev, rawMaterials: newMat }));
+                          }}
+                        >
+                          <option value="">কাঁচামাল নির্বাচন করুন...</option>
+                          {rawMaterials.map(r => (
+                            <option key={r.id} value={r.id}>
+                              {r.name} (মজুদ: {r.stock} {r.unit} | দর: ৳{r.purchasePrice})
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+
+                      <div className="sm:col-span-3 space-y-1">
+                        <div className="flex items-center gap-1">
+                          <input 
+                            type="number"
+                            required
+                            min="0.01"
+                            step="any"
+                            placeholder="ব্যবহৃত পরিমাণ"
+                            className="w-full border-2 border-slate-100 rounded-xl p-3 font-bold text-xs bg-slate-50 outline-none"
+                            value={item.quantity || ''}
+                            onChange={e => {
+                              const newMat = [...batchForm.rawMaterials];
+                              newMat[index].quantity = parseFloat(e.target.value) || 0;
+                              setBatchForm(prev => ({ ...prev, rawMaterials: newMat }));
+                            }}
+                          />
+                          <span className="text-[10px] font-black text-slate-400 uppercase">{raw?.unit || 'unit'}</span>
+                        </div>
+                      </div>
+
+                      <div className="sm:col-span-3 font-black text-xs text-amber-900 flex flex-col justify-center">
+                        <span>খরচ: ৳{lineCost.toLocaleString()}</span>
+                        {isStockShort && <span className="text-[9px] text-rose-500 font-bold">⚠️ স্টকে কম আছে</span>}
+                      </div>
+
+                      <div className="sm:col-span-1 text-right">
+                        {batchForm.rawMaterials.length > 1 && (
+                          <button 
+                            type="button"
+                            onClick={() => {
+                              const newMat = batchForm.rawMaterials.filter((_, i) => i !== index);
+                              setBatchForm(prev => ({ ...prev, rawMaterials: newMat }));
+                            }}
+                            className="p-2 text-slate-300 hover:text-rose-500 rounded-lg transition-colors"
+                          >
+                            <Trash2 size={16}/>
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* Extra Costs & Date */}
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                <div className="space-y-1">
+                  <label className="text-[9px] font-black text-slate-500 uppercase tracking-widest">মজুরি ও লেবার খরচ (৳)</label>
+                  <input 
+                    type="number"
+                    min="0"
+                    step="any"
+                    className="w-full border-2 border-slate-100 rounded-2xl p-3.5 font-bold text-sm bg-slate-50 outline-none"
+                    value={batchForm.laborCost || ''}
+                    onChange={e => setBatchForm(prev => ({ ...prev, laborCost: parseFloat(e.target.value) || 0 }))}
+                    placeholder="মজুরি খরচ..."
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-[9px] font-black text-slate-500 uppercase tracking-widest">বিদ্যুৎ/প্যাকিং/অন্যান্য (৳)</label>
+                  <input 
+                    type="number"
+                    min="0"
+                    step="any"
+                    className="w-full border-2 border-slate-100 rounded-2xl p-3.5 font-bold text-sm bg-slate-50 outline-none"
+                    value={batchForm.otherCost || ''}
+                    onChange={e => setBatchForm(prev => ({ ...prev, otherCost: parseFloat(e.target.value) || 0 }))}
+                    placeholder="অন্যান্য খরচ..."
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-[9px] font-black text-slate-500 uppercase tracking-widest">উৎপাদন তারিখ</label>
+                  <input 
+                    type="date"
+                    required
+                    className="w-full border-2 border-slate-100 rounded-2xl p-3.5 font-bold text-sm bg-slate-50 outline-none"
+                    value={batchForm.date}
+                    onChange={e => setBatchForm(prev => ({ ...prev, date: e.target.value }))}
+                  />
+                </div>
+              </div>
+
+              {/* Batch Financial Summary Box */}
+              <div className="bg-slate-900 text-white p-6 rounded-3xl space-y-3">
+                <h4 className="text-[10px] font-black uppercase tracking-[3px] text-slate-400">উৎপাদন ব্যাচ সারসংক্ষেপ</h4>
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 text-xs font-black pt-2 border-t border-slate-800">
                   <div>
-                    <label className="text-[10px] font-black text-slate-600 uppercase tracking-widest mb-2 block ml-1">পণ্যের নাম</label>
-                    <input required className="w-full border-2 border-slate-100 rounded-2xl p-4.5 font-black text-base bg-slate-50 outline-none focus:bg-white focus:ring-4 focus:ring-primary/5 transition-all" value={formData.name} onChange={e => setFormData({...formData, name: e.target.value})} placeholder="পণ্যর নাম লিখুন" />
+                    <span className="text-slate-400 block text-[9px] font-bold">কাঁচামাল মোট ব্যয়</span>
+                    <span className="text-amber-400 text-base">৳{calculatedBatch.totalRawMaterialCost.toLocaleString()}</span>
                   </div>
-                  
-                  <div className="grid grid-cols-2 gap-6">
-                    <div>
-                      <label className="text-[10px] font-black text-slate-600 uppercase tracking-widest mb-2 block ml-1">ক্যাটাগরি</label>
-                      <select className="w-full border-2 border-slate-100 rounded-2xl p-4.5 font-black text-sm bg-slate-50 outline-none focus:bg-white transition-all" value={formData.category} onChange={e => setFormData({...formData, category: e.target.value})}>
-                        <option value="other">অন্যান্য (Other)</option>
-                        {categories.map(c => <option key={c.id} value={c.slug}>{c.name}</option>)}
-                      </select>
-                    </div>
-                    <div>
-                      <label className="text-[10px] font-black text-slate-600 uppercase tracking-widest mb-2 block ml-1">ইউনিট (Unit)</label>
-                      <select className="w-full border-2 border-slate-100 rounded-2xl p-4.5 bg-slate-50 font-black text-sm outline-none" value={formData.unit} onChange={e => setFormData({...formData, unit: e.target.value as any})}>
-                        <option value="pcs">Pcs</option><option value="kg">Kg</option><option value="box">Box</option><option value="pkt">Pkt</option>
-                      </select>
-                    </div>
+                  <div>
+                    <span className="text-slate-400 block text-[9px] font-bold">মজুরি ও অতিরিক্ত খরচ</span>
+                    <span className="text-blue-400 text-base">৳{((Number(batchForm.laborCost) || 0) + (Number(batchForm.otherCost) || 0)).toLocaleString()}</span>
                   </div>
-
-                  <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
-                    <div className="bg-rose-50 p-4 rounded-3xl border-2 border-rose-100">
-                      <label className="text-[9px] font-black text-rose-500 uppercase tracking-widest mb-2 block ml-1">ক্রয় মূল্য (৳)</label>
-                      <input type="number" required className="w-full bg-white border-none rounded-xl p-3 font-black text-lg text-rose-700 outline-none focus:ring-4 focus:ring-rose-500/10" value={formData.purchasePrice} onChange={e => setFormData({...formData, purchasePrice: parseFloat(e.target.value) || 0})} />
-                    </div>
-                    <div className="bg-blue-50 p-4 rounded-3xl border-2 border-blue-100">
-                      <label className="text-[9px] font-black text-blue-500 uppercase tracking-widest mb-2 block ml-1">খুচরা মূল্য (৳)</label>
-                      <input type="number" required className="w-full bg-white border-none rounded-xl p-3 font-black text-lg text-blue-700 outline-none focus:ring-4 focus:ring-blue-500/10" value={formData.salePrice} onChange={e => setFormData({...formData, salePrice: parseFloat(e.target.value) || 0})} />
-                    </div>
-                    <div className="bg-emerald-50 p-4 rounded-3xl border-2 border-emerald-100">
-                      <label className="text-[9px] font-black text-emerald-500 uppercase tracking-widest mb-2 block ml-1">পাইকারি মূল্য (৳)</label>
-                      <input type="number" required className="w-full bg-white border-none rounded-xl p-3 font-black text-lg text-emerald-700 outline-none focus:ring-4 focus:ring-emerald-500/10" value={formData.wholesalePrice} onChange={e => setFormData({...formData, wholesalePrice: parseFloat(e.target.value) || 0})} />
-                    </div>
-                    <div className="bg-amber-50 p-4 rounded-3xl border-2 border-amber-100">
-                      <label className="text-[9px] font-black text-amber-500 uppercase tracking-widest mb-2 block ml-1">ডিস্ট্রিবিউটর (৳)</label>
-                      <input type="number" required className="w-full bg-white border-none rounded-xl p-3 font-black text-lg text-amber-700 outline-none focus:ring-4 focus:ring-amber-500/10" value={formData.distributorPrice} onChange={e => setFormData({...formData, distributorPrice: parseFloat(e.target.value) || 0})} />
-                    </div>
+                  <div>
+                    <span className="text-slate-400 block text-[9px] font-bold">মোট ব্যাচ উৎপাদন খরচ</span>
+                    <span className="text-emerald-400 text-base">৳{calculatedBatch.totalBatchCost.toLocaleString()}</span>
                   </div>
-
-                  <div className="grid grid-cols-2 gap-6">
-                    <div>
-                      <label className="text-[10px] font-black text-slate-600 uppercase tracking-widest mb-2 block ml-1">বর্তমান স্টক</label>
-                      <div className="relative">
-                         <LayoutGrid className="absolute left-4 top-4 text-slate-400" size={18}/>
-                         <input type="number" required className="w-full border-2 border-slate-100 rounded-2xl pl-12 pr-4 py-4 font-black text-xl text-slate-800 bg-slate-50 outline-none focus:bg-white" value={formData.stock} onChange={e => setFormData({...formData, stock: parseInt(e.target.value) || 0})} />
-                      </div>
-                    </div>
-                    <div>
-                      <label className="text-[10px] font-black text-slate-600 uppercase tracking-widest mb-2 block ml-1">ক্রয় তারিখ (Purchase Date)</label>
-                      <div className="relative">
-                         <Calendar className="absolute left-4 top-4 text-slate-400" size={18}/>
-                         <input type="date" className="w-full border-2 border-slate-100 rounded-2xl pl-12 pr-4 py-4 font-black text-sm text-slate-800 bg-slate-50 outline-none focus:bg-white" value={formData.dateAdded?.split('T')[0]} onChange={e => setFormData({...formData, dateAdded: e.target.value})} />
-                      </div>
-                    </div>
+                  <div>
+                    <span className="text-slate-400 block text-[9px] font-bold">প্রতি ইউনিট উৎপাদন দর</span>
+                    <span className="text-white text-base">৳{calculatedBatch.unitProductionCost.toLocaleString()}/{batchForm.unit}</span>
                   </div>
                 </div>
               </div>
 
               <button 
-                disabled={isUploading}
-                className="w-full bg-primary text-white py-6 rounded-[28px] font-black shadow-2xl shadow-primary/20 flex items-center justify-center gap-3 uppercase tracking-widest text-sm transition-all active:scale-95 mt-4 disabled:opacity-50 disabled:cursor-not-allowed"
+                type="submit"
+                className="w-full bg-amber-500 hover:bg-amber-600 text-white py-5 rounded-2xl font-black uppercase text-xs tracking-widest shadow-xl shadow-amber-500/20 active:scale-95 transition-all flex items-center justify-center gap-2"
               >
-                {isUploading ? <Loader2 className="animate-spin" size={24} /> : <Save size={24}/>}
-                {isUploading ? 'ছবি আপলোড হচ্ছে...' : 'পণ্য তথ্য সংরক্ষণ করুন'}
+                <CheckCircle2 size={18}/> উৎপাদন ব্যাচ সম্পন্ন করুন ও স্টক সমন্বয় করুন
               </button>
             </form>
-          </div>
+          </motion.div>
+        </div>
+      )}
+
+      {/* MODAL 3: Stock Quick Entry */}
+      {showStockModal && (
+        <div className="fixed inset-0 z-[110] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-md">
+          <motion.div initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} className="bg-white w-full max-w-lg rounded-[40px] overflow-hidden shadow-2xl p-8">
+            <div className="flex justify-between items-center mb-6 pb-4 border-b border-slate-100">
+              <div className="flex items-center gap-3">
+                <div className="bg-emerald-600 p-3 rounded-2xl text-white shadow-lg"><Plus size={20}/></div>
+                <div>
+                  <h3 className="text-lg font-black text-slate-800 uppercase">দৈনিক স্টক এন্ট্রি</h3>
+                  <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mt-0.5">পণ্য বা কাঁচামালে দ্রুত স্টক যোগ করুন</p>
+                </div>
+              </div>
+              <button onClick={() => setShowStockModal(false)} className="text-slate-400 hover:text-rose-500 p-2 rounded-xl transition-all"><X size={20}/></button>
+            </div>
+            
+            <form onSubmit={handleStockSubmit} className="space-y-6">
+              <div className="space-y-2">
+                <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">পণ্য বা কাঁচামাল নির্বাচন করুন *</label>
+                <select 
+                  required
+                  className="w-full border-2 border-slate-100 rounded-2xl p-4 font-bold text-sm bg-slate-50 outline-none focus:bg-white cursor-pointer"
+                  value={stockEntryForm.productId}
+                  onChange={e => setStockEntryForm({ ...stockEntryForm, productId: e.target.value })}
+                >
+                  <option value="">সিলেক্ট করুন...</option>
+                  <optgroup label="📦 উৎপাদিত / রেডি পণ্য">
+                    {finishedGoods.map(p => (
+                      <option key={p.id} value={p.id}>{p.name} (মজুদ: {p.stock} {p.unit})</option>
+                    ))}
+                  </optgroup>
+                  <optgroup label="🌾 কাঁচামাল (Raw Materials)">
+                    {rawMaterials.map(p => (
+                      <option key={p.id} value={p.id}>{p.name} (মজুদ: {p.stock} {p.unit})</option>
+                    ))}
+                  </optgroup>
+                </select>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">পরিমাণ (Quantity) *</label>
+                  <input 
+                    type="number"
+                    required
+                    min="1"
+                    className="w-full border-2 border-slate-100 rounded-2xl p-4 font-black text-lg bg-slate-50 outline-none focus:bg-white"
+                    value={stockEntryForm.quantity || ''}
+                    onChange={e => setStockEntryForm({ ...stockEntryForm, quantity: parseInt(e.target.value) || 0 })}
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">তারিখ *</label>
+                  <input 
+                    type="date"
+                    required
+                    className="w-full border-2 border-slate-100 rounded-2xl p-4 font-bold text-xs bg-slate-50 outline-none focus:bg-white"
+                    value={stockEntryForm.date}
+                    onChange={e => setStockEntryForm({ ...stockEntryForm, date: e.target.value })}
+                  />
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">মন্তব্য / নোট (ঐচ্ছিক)</label>
+                <input 
+                  type="text"
+                  placeholder="স্টক যোগ করার কারণ বা নোট..."
+                  className="w-full border-2 border-slate-100 rounded-2xl p-4 font-bold text-sm bg-slate-50 outline-none focus:bg-white"
+                  value={stockEntryForm.note}
+                  onChange={e => setStockEntryForm({ ...stockEntryForm, note: e.target.value })}
+                />
+              </div>
+
+              <button className="w-full bg-emerald-600 hover:bg-emerald-700 text-white py-5 rounded-2xl font-black uppercase text-xs tracking-widest shadow-xl shadow-emerald-600/20 active:scale-95 transition-all flex items-center justify-center gap-2">
+                <Save size={18}/> স্টক আপডেট করুন
+              </button>
+            </form>
+          </motion.div>
+        </div>
+      )}
+
+      {/* MODAL 4: Category Management */}
+      {showCategoryModal && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-md">
+          <motion.div initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} className="bg-white w-full max-w-md rounded-[32px] overflow-hidden shadow-2xl p-8">
+            <div className="flex justify-between items-center mb-6 pb-4 border-b border-slate-100">
+              <div>
+                <h3 className="text-lg font-black text-slate-800 tracking-tight">Categories</h3>
+                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-0.5">ক্যাটাগরি ব্যবস্থাপনা</p>
+              </div>
+              <button onClick={() => setShowCategoryModal(false)} className="p-2 hover:bg-slate-100 rounded-xl transition-all"><X size={18}/></button>
+            </div>
+
+            <form onSubmit={handleAddCategory} className="mb-6">
+              <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 block ml-1">নতুন ক্যাটাগরি</label>
+              <div className="flex gap-2">
+                <input name="categoryName" type="text" placeholder="ক্যাটাগরির নাম লিখুন..." className="flex-1 bg-slate-50 border-2 border-slate-100 rounded-2xl px-4 py-3 font-bold text-sm outline-none focus:bg-white" required />
+                <button type="submit" className="bg-primary text-white p-3.5 rounded-2xl shadow-lg shadow-primary/20 active:scale-95 transition-all"><Plus size={18}/></button>
+              </div>
+            </form>
+
+            <div className="space-y-2 max-h-[250px] overflow-y-auto pr-2 custom-scrollbar">
+              {categories.map(cat => (
+                <div key={cat.id} className="flex items-center justify-between p-3.5 bg-slate-50 rounded-2xl border-2 border-transparent hover:border-slate-100 transition-all">
+                  <div className="flex items-center gap-3">
+                    <div className="w-8 h-8 bg-white rounded-xl flex items-center justify-center text-primary shadow-sm overflow-hidden">
+                      {cat.imageUrl ? <img src={cat.imageUrl} alt={cat.name} className="w-full h-full object-cover" /> : <Tag size={14}/>}
+                    </div>
+                    <span className="font-black text-xs text-slate-700">{cat.name}</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </motion.div>
         </div>
       )}
     </div>

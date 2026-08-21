@@ -1,16 +1,17 @@
 import React, { useState, useMemo } from 'react';
 import { Expense, Staff } from '../types';
-import { Plus, TrendingDown, FileText, Calendar, Calculator, Zap } from 'lucide-react';
+import { Plus, TrendingDown, FileText, Calendar, Calculator, Zap, Trash2 } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 
 interface ExpensesProps {
   expenses: Expense[];
   onAddExpense: (expense: Expense) => void;
+  onDeleteExpense?: (id: string) => void;
   isAdmin: boolean;
   currentStaff?: Staff | null;
 }
 
-const Expenses: React.FC<ExpensesProps> = ({ expenses, onAddExpense, isAdmin, currentStaff }) => {
+const Expenses: React.FC<ExpensesProps> = ({ expenses, onAddExpense, onDeleteExpense, isAdmin, currentStaff }) => {
   const getLocalDate = () => {
     const d = new Date();
     d.setMinutes(d.getMinutes() - d.getTimezoneOffset());
@@ -188,8 +189,23 @@ const Expenses: React.FC<ExpensesProps> = ({ expenses, onAddExpense, isAdmin, cu
                             <div className="text-[10px] text-slate-400 font-bold uppercase mt-1">{item.date} • {item.description || 'বিবরণ নেই'}</div>
                          </div>
                       </div>
-                      <div className="text-right">
-                         <div className="font-black text-rose-600 text-lg tracking-tightest">৳{item.amount.toLocaleString()}</div>
+                      <div className="flex items-center gap-4">
+                        <div className="text-right">
+                           <div className="font-black text-rose-600 text-lg tracking-tightest">৳{item.amount.toLocaleString()}</div>
+                        </div>
+                        {onDeleteExpense && (isAdmin || item.addedBy === currentStaff?.id) && (
+                          <button
+                            onClick={() => {
+                              if (confirm('আপনি কি নিশ্চিত যে এই খরচের রেকর্ডটি ডিলিট করতে চান?')) {
+                                onDeleteExpense(item.id);
+                              }
+                            }}
+                            className="p-2 rounded-xl bg-rose-50 text-rose-600 hover:bg-rose-600 hover:text-white transition-all opacity-0 group-hover:opacity-100"
+                            title="মুছে ফেলুন"
+                          >
+                            <Trash2 size={16} />
+                          </button>
+                        )}
                       </div>
                    </div>
                  ))

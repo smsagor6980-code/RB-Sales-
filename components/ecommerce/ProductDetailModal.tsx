@@ -1,5 +1,5 @@
 import React from 'react';
-import { X, ShoppingCart, Heart, Share2, Star, ShieldCheck, Truck, RotateCcw, Package, Minus, Plus } from 'lucide-react';
+import { X, ShoppingCart, Heart, Share2, Star, ShieldCheck, Truck, RotateCcw, Package, Minus, Plus, QrCode, Download } from 'lucide-react';
 import { Product } from '../../types';
 import { motion, AnimatePresence } from 'framer-motion';
 
@@ -12,7 +12,7 @@ interface ProductDetailModalProps {
   isInWishlist?: boolean;
   isInCart?: boolean;
   cartQuantity?: number;
-  onUpdateCartQuantity?: (productId: string, delta: number) => void;
+  onUpdateCartQuantity?: (productId: string, delta: number, absoluteQty?: number) => void;
 }
 
 const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
@@ -26,7 +26,53 @@ const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
   cartQuantity,
   onUpdateCartQuantity
 }) => {
+  const [tempDetailQty, setTempDetailQty] = React.useState<string>('');
+  const [showQR, setShowQR] = React.useState(false);
+  const [qrDataUrl, setQrDataUrl] = React.useState<string>('');
+
+  React.useEffect(() => {
+    if (cartQuantity !== undefined) {
+      setTempDetailQty('');
+    }
+  }, [cartQuantity]);
+
+  React.useEffect(() => {
+    if (!isOpen) {
+      setShowQR(false);
+    }
+  }, [isOpen]);
+
+  React.useEffect(() => {
+    if (isOpen && product) {
+      const dataStr = product.sku || product.id;
+      // Use standard, high-reliability public QR generator API with H error correction
+      setQrDataUrl(`https://api.qrserver.com/v1/create-qr-code/?size=256x256&ecc=H&margin=1&data=${encodeURIComponent(dataStr)}`);
+    } else {
+      setQrDataUrl('');
+    }
+  }, [isOpen, product]);
+
   if (!product) return null;
+
+  const downloadQRCode = async () => {
+    if (!qrDataUrl) return;
+    try {
+      const response = await fetch(qrDataUrl);
+      const blob = await response.blob();
+      const blobUrl = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = blobUrl;
+      link.download = `QR_${product.sku || product.id}_${product.name.replace(/\s+/g, '_')}.png`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(blobUrl);
+    } catch (err) {
+      console.error("Failed to download QR Code", err);
+      // Fallback: Open in a new tab if fetch fails due to any reason
+      window.open(qrDataUrl, '_blank');
+    }
+  };
 
   return (
     <AnimatePresence>
@@ -43,7 +89,7 @@ const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
             initial={{ opacity: 0, scale: 0.9, y: 20 }}
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.9, y: 20 }}
-            className="fixed inset-4 md:inset-auto md:top-1/2 md:left-1/2 md:-translate-x-1/2 md:-translate-y-1/2 md:w-full md:max-w-4xl bg-white z-[160] rounded-[48px] shadow-2xl overflow-hidden flex flex-col md:flex-row"
+            className="fixed inset-4 md:inset-auto md:top-1/2 md:left-1/2 md:-translate-x-1/2 md:-translate-y-1/2 md:w-full md:max-w-4xl md:h-[85vh] max-h-[90vh] bg-white z-[160] rounded-[48px] shadow-2xl overflow-hidden flex flex-col md:flex-row"
           >
             {/* Left: Image Side */}
             <div className="w-full md:w-1/2 bg-slate-50 relative group">
@@ -113,16 +159,39 @@ const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
                   {isInCart ? (
                     <div className="flex-1 flex items-center justify-between bg-slate-100 rounded-3xl p-2 h-16">
                       <button 
-                        onClick={() => onUpdateCartQuantity?.(product.id, -1)}
+                        onClick={() => {
+                          onUpdateCartQuantity?.(product.id, -1);
+                          setTempDetailQty('');
+                        }}
                         className="w-12 h-12 bg-white rounded-2xl flex items-center justify-center text-slate-600 shadow-sm hover:scale-105 transition-all"
                       >
                         <Minus size={20} />
                       </button>
-                      <span className="font-black text-xl text-slate-800">
-                        {cartQuantity}
-                      </span>
+                      <input 
+                        type="number"
+                        min="1"
+                        className="w-16 text-center font-black text-xl text-slate-800 bg-transparent border-none p-0 focus:outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                        value={tempDetailQty !== '' ? tempDetailQty : (cartQuantity || 1)}
+                        onChange={(e) => {
+                          const valStr = e.target.value;
+                          setTempDetailQty(valStr);
+                          const val = parseInt(valStr, 10);
+                          if (!isNaN(val) && val > 0) {
+                            onUpdateCartQuantity?.(product.id, 0, val);
+                          }
+                        }}
+                        onBlur={() => {
+                          setTempDetailQty('');
+                          if (cartQuantity === undefined || cartQuantity < 1) {
+                            onUpdateCartQuantity?.(product.id, 0, 1);
+                          }
+                        }}
+                      />
                       <button 
-                        onClick={() => onUpdateCartQuantity?.(product.id, 1)}
+                        onClick={() => {
+                          onUpdateCartQuantity?.(product.id, 1);
+                          setTempDetailQty('');
+                        }}
                         className="w-12 h-12 bg-white rounded-2xl flex items-center justify-center text-slate-600 shadow-sm hover:scale-105 transition-all"
                       >
                         <Plus size={20} />
@@ -149,6 +218,62 @@ const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
                 <button className="w-full h-16 bg-slate-900 text-white rounded-3xl font-black uppercase text-xs tracking-widest hover:bg-slate-800 transition-all flex items-center justify-center gap-3">
                   <Share2 size={20} /> বন্ধুদের সাথে শেয়ার করুন
                 </button>
+
+                <div className="border-t border-slate-100 pt-4 mt-2">
+                  <button 
+                    onClick={() => setShowQR(!showQR)}
+                    className="w-full h-14 border-2 border-dashed border-primary/25 hover:border-primary/50 text-primary rounded-3xl font-black uppercase text-xs tracking-widest transition-all flex items-center justify-center gap-3 bg-primary/5 hover:bg-primary/10"
+                  >
+                    <QrCode size={18} /> {showQR ? "কিউআর কোড লুকান" : "ইন-স্টোর স্ক্যান কিউআর কোড"}
+                  </button>
+
+                  <AnimatePresence>
+                    {showQR && (
+                      <motion.div
+                        initial={{ opacity: 0, height: 0, marginTop: 0 }}
+                        animate={{ opacity: 1, height: 'auto', marginTop: 16 }}
+                        exit={{ opacity: 0, height: 0, marginTop: 0 }}
+                        className="overflow-hidden bg-slate-50 rounded-3xl border border-slate-100 p-6 flex flex-col items-center"
+                      >
+                        <div className="bg-white p-4 rounded-2xl shadow-sm border border-slate-100">
+                          {qrDataUrl ? (
+                            <img
+                              src={qrDataUrl}
+                              alt="Product QR Code"
+                              className="w-40 h-40 object-contain"
+                              referrerPolicy="no-referrer"
+                            />
+                          ) : (
+                            <div className="w-40 h-40 flex items-center justify-center text-slate-400 font-bold text-xs">
+                              লোড হচ্ছে...
+                            </div>
+                          )}
+                        </div>
+
+                        <div className="text-center mt-4 w-full">
+                          <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">কিউআর কোড ভ্যালু</span>
+                          <p className="font-mono text-sm font-black text-slate-800 mt-0.5 break-all px-2">{product.sku || product.id}</p>
+                          {product.sku ? (
+                            <span className="inline-block bg-primary/10 text-primary text-[9px] font-bold px-2.5 py-0.5 rounded-full mt-1.5 uppercase">SKU কোড</span>
+                          ) : (
+                            <span className="inline-block bg-amber-50 text-amber-600 text-[9px] font-bold px-2.5 py-0.5 rounded-full mt-1.5 uppercase">প্রোডাক্ট আইডি</span>
+                          )}
+                        </div>
+
+                        <p className="text-xs text-slate-400 font-bold text-center mt-3 max-w-[240px] leading-relaxed">
+                          পণ্যটি ইন-স্টোরে দ্রুত স্ক্যান করে বিলিং কাউন্টারে খুঁজতে এই কিউআর কোড ব্যবহার করুন।
+                        </p>
+
+                        <button
+                          onClick={downloadQRCode}
+                          className="flex items-center gap-2 px-5 py-3 bg-slate-900 text-white rounded-2xl text-xs font-black uppercase tracking-wider hover:bg-slate-800 transition-all shadow-md mt-4 hover:scale-[1.02] active:scale-[0.98]"
+                        >
+                          <Download size={14} /> কিউআর ডাউনলোড (PNG)
+                        </button>
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
+                </div>
               </div>
 
               {/* Trust Badges */}

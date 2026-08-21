@@ -7,7 +7,7 @@ interface CartDrawerProps {
   isOpen: boolean;
   onClose: () => void;
   items: CartItem[];
-  onUpdateQuantity: (productId: string, delta: number) => void;
+  onUpdateQuantity: (productId: string, delta: number, absoluteQty?: number) => void;
   onRemoveItem: (productId: string) => void;
   onCheckout: () => void;
 }
@@ -20,6 +20,7 @@ const CartDrawer: React.FC<CartDrawerProps> = ({
   onRemoveItem,
   onCheckout
 }) => {
+  const [tempCartQtys, setTempCartQtys] = React.useState<Record<string, string>>({});
   const subtotal = items.reduce((sum, item) => sum + item.total, 0);
   const deliveryFee = items.length > 0 ? 60 : 0;
   const total = subtotal + deliveryFee;
@@ -113,30 +114,65 @@ const CartDrawer: React.FC<CartDrawerProps> = ({
                           </button>
                         </div>
                         <p className="text-primary font-black text-sm mt-1">
-                          ৳{item.unitPrice.toLocaleString()}
+                          ৳{(item.unitPrice ?? 0).toLocaleString()}
                         </p>
                       </div>
 
                       <div className="flex items-center justify-between">
                         <div className="flex items-center bg-slate-50 rounded-xl p-1 border border-slate-100">
                           <button 
-                            onClick={() => onUpdateQuantity(item.productId, -1)}
+                            onClick={() => {
+                              onUpdateQuantity(item.productId, -1);
+                              setTempCartQtys(prev => {
+                                const next = { ...prev };
+                                delete next[item.productId];
+                                return next;
+                              });
+                            }}
                             className="p-1.5 hover:bg-white rounded-lg text-slate-600 transition-colors"
                           >
                             <Minus size={14} />
                           </button>
-                          <span className="w-8 text-center font-black text-xs text-slate-800">
-                            {item.quantity}
-                          </span>
+                          <input 
+                            type="number"
+                            min="1"
+                            className="w-8 text-center font-black text-xs text-slate-800 bg-transparent border-none p-0 focus:outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                            value={tempCartQtys[item.productId] !== undefined ? tempCartQtys[item.productId] : item.quantity}
+                            onChange={(e) => {
+                              const valStr = e.target.value;
+                              setTempCartQtys(prev => ({ ...prev, [item.productId]: valStr }));
+                              const val = parseInt(valStr, 10);
+                              if (!isNaN(val) && val > 0) {
+                                onUpdateQuantity(item.productId, 0, val);
+                              }
+                            }}
+                            onBlur={() => {
+                              setTempCartQtys(prev => {
+                                const next = { ...prev };
+                                delete next[item.productId];
+                                return next;
+                              });
+                              if (item.quantity < 1) {
+                                onUpdateQuantity(item.productId, 0, 1);
+                              }
+                            }}
+                          />
                           <button 
-                            onClick={() => onUpdateQuantity(item.productId, 1)}
+                            onClick={() => {
+                              onUpdateQuantity(item.productId, 1);
+                              setTempCartQtys(prev => {
+                                const next = { ...prev };
+                                delete next[item.productId];
+                                return next;
+                              });
+                            }}
                             className="p-1.5 hover:bg-white rounded-lg text-slate-600 transition-colors"
                           >
                             <Plus size={14} />
                           </button>
                         </div>
                         <span className="font-black text-slate-800 text-sm">
-                          ৳{item.total.toLocaleString()}
+                          ৳{(item.total ?? 0).toLocaleString()}
                         </span>
                       </div>
                     </div>
@@ -151,17 +187,17 @@ const CartDrawer: React.FC<CartDrawerProps> = ({
                 <div className="space-y-2">
                   <div className="flex justify-between text-sm font-bold text-slate-500">
                     <span>সাব-টোটাল</span>
-                    <span>৳{subtotal.toLocaleString()}</span>
+                    <span>৳{(subtotal ?? 0).toLocaleString()}</span>
                   </div>
                   <div className="flex justify-between text-sm font-bold text-slate-500">
                     <span>ডেলিভারি চার্জ</span>
-                    <span>৳{deliveryFee.toLocaleString()}</span>
+                    <span>৳{(deliveryFee ?? 0).toLocaleString()}</span>
                   </div>
                   <div className="h-[1px] bg-slate-200 my-2"></div>
                   <div className="flex justify-between items-center">
                     <span className="font-black text-slate-800 uppercase tracking-widest text-xs">সর্বমোট</span>
                     <span className="font-black text-primary text-2xl tracking-tighter">
-                      ৳{total.toLocaleString()}
+                      ৳{(total ?? 0).toLocaleString()}
                     </span>
                   </div>
                 </div>

@@ -66,14 +66,37 @@ const EcommerceLayout: React.FC<EcommerceLayoutProps> = ({
               </button>
               <div 
                 onClick={onGoHome}
-                className="flex items-center gap-2 cursor-pointer group"
+                className="flex items-center gap-2.5 cursor-pointer group"
               >
-                <div className="w-8 h-8 sm:w-10 sm:h-10 bg-primary rounded-lg sm:rounded-xl flex items-center justify-center text-white shadow-lg shadow-primary/20 group-hover:scale-110 transition-transform">
-                  <Package size={18} className="sm:w-5 sm:h-5" />
+                {shopSettings?.logoUrl ? (
+                  <div className="h-9 sm:h-11 max-w-[130px] sm:max-w-[160px] bg-white rounded-xl p-1 shadow-sm border border-slate-200 flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform overflow-hidden">
+                    <img 
+                      src={shopSettings.logoUrl} 
+                      alt={shopSettings.headerTitle || shopSettings.name || 'Logo'} 
+                      className="max-h-full w-auto max-w-full object-contain"
+                    />
+                  </div>
+                ) : (
+                  <div className="w-8 h-8 sm:w-10 sm:h-10 bg-primary rounded-lg sm:rounded-xl flex items-center justify-center text-white shadow-lg shadow-primary/20 group-hover:scale-110 transition-transform shrink-0">
+                    <Package size={18} className="sm:w-5 sm:h-5" />
+                  </div>
+                )}
+                <div className="flex flex-col justify-center">
+                  <span className="text-lg sm:text-2xl font-black tracking-normal uppercase hidden xs:block leading-tight text-slate-900">
+                    {shopSettings?.headerTitle ? (
+                      shopSettings.headerTitle
+                    ) : (
+                      <>
+                        {shopSettings?.name?.split(' ')[0] || 'REST'} <span className="text-primary">{shopSettings?.name?.split(' ').slice(1).join(' ') || 'BAZAR'}</span>
+                      </>
+                    )}
+                  </span>
+                  {shopSettings?.headerSubtitle && (
+                    <span className="text-[10px] sm:text-xs font-bold text-slate-500 tracking-wide whitespace-nowrap hidden sm:block mt-0.5">
+                      {shopSettings.headerSubtitle}
+                    </span>
+                  )}
                 </div>
-                <span className="text-lg sm:text-xl font-black tracking-tighter uppercase hidden xs:block">
-                  {shopSettings?.name?.split(' ')[0] || 'REST'} <span className="text-primary">{shopSettings?.name?.split(' ').slice(1).join(' ') || 'BAZER'}</span>
-                </span>
               </div>
             </div>
 
@@ -130,14 +153,24 @@ const EcommerceLayout: React.FC<EcommerceLayoutProps> = ({
                 )}
               </button>
 
-              {isAdmin && onSwitchToAdmin && (
-                <button 
-                  onClick={onSwitchToAdmin}
-                  className="flex items-center gap-2 px-3 sm:px-4 py-2 bg-slate-900 text-white rounded-xl text-[10px] sm:text-xs font-black uppercase tracking-widest hover:bg-slate-800 transition-all"
-                >
-                  <Package size={16} className="sm:hidden" />
-                  <span className="hidden sm:block">Admin</span>
-                </button>
+              {onSwitchToAdmin && (
+                isAdmin ? (
+                  <button 
+                    onClick={onSwitchToAdmin}
+                    className="flex items-center gap-1.5 px-3 py-2 bg-slate-900 text-white rounded-xl text-[10px] sm:text-xs font-black uppercase tracking-widest hover:bg-slate-800 transition-all"
+                  >
+                    <Package size={14} />
+                    <span>এডমিন</span>
+                  </button>
+                ) : (
+                  <button 
+                    onClick={onSwitchToAdmin}
+                    className="flex items-center gap-1.5 px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-[10px] sm:text-xs font-bold transition-all"
+                  >
+                    <User size={14} />
+                    <span>স্টাফ লগইন</span>
+                  </button>
+                )
               )}
 
               <div className="h-8 w-[1px] bg-slate-200 mx-1 hidden lg:block"></div>
@@ -285,6 +318,14 @@ const EcommerceLayout: React.FC<EcommerceLayoutProps> = ({
                     className="w-full flex items-center gap-3 p-4 rounded-2xl bg-slate-900 text-white font-bold transition-all"
                   >
                     <Package size={20} /> এডমিন প্যানেল
+                  </button>
+                )}
+                {!isAdmin && onSwitchToAdmin && (
+                  <button 
+                    onClick={() => { onSwitchToAdmin(); setIsMenuOpen(false); }}
+                    className="w-full flex items-center gap-3 p-4 rounded-2xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold transition-all"
+                  >
+                    <User size={20} /> স্টাফ লগইন
                   </button>
                 )}
               </div>

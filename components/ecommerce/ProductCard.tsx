@@ -11,7 +11,7 @@ interface ProductCardProps {
   isInWishlist?: boolean;
   isInCart?: boolean;
   cartQuantity?: number;
-  onUpdateCartQuantity?: (productId: string, delta: number) => void;
+  onUpdateCartQuantity?: (productId: string, delta: number, absoluteQty?: number) => void;
 }
 
 const ProductCard = React.forwardRef<HTMLDivElement, ProductCardProps>(({
@@ -24,6 +24,14 @@ const ProductCard = React.forwardRef<HTMLDivElement, ProductCardProps>(({
   cartQuantity,
   onUpdateCartQuantity
 }, ref) => {
+  const [tempQty, setTempQty] = React.useState<string>('');
+
+  React.useEffect(() => {
+    if (cartQuantity !== undefined) {
+      setTempQty('');
+    }
+  }, [cartQuantity]);
+
   return (
     <motion.div 
       ref={ref}
@@ -67,11 +75,31 @@ const ProductCard = React.forwardRef<HTMLDivElement, ProductCardProps>(({
           </button>
         </div>
 
-        {/* View Details Overlay */}
-        <div 
-          onClick={() => onViewDetails(product)}
-          className="absolute inset-0 bg-black/5 opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer"
-        />
+        {/* Interactive Overlay with Action Buttons */}
+        <div className="absolute inset-0 bg-slate-900/40 backdrop-blur-[2px] opacity-0 group-hover:opacity-100 transition-all duration-300 flex flex-col items-center justify-center gap-3 p-4 z-10">
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              onViewDetails(product);
+            }}
+            className="w-11/12 py-3 bg-white hover:bg-slate-50 text-slate-800 rounded-2xl font-black text-xs uppercase tracking-wider transition-all transform translate-y-4 group-hover:translate-y-0 duration-300 shadow-xl flex items-center justify-center gap-2 cursor-pointer active:scale-95"
+          >
+            <Star size={14} className="text-amber-500 fill-amber-500" /> পণ্য ভিউ করুন
+          </button>
+          
+          <button
+            type="button"
+            disabled={product.stock === 0}
+            onClick={(e) => {
+              e.stopPropagation();
+              onAddToCart(product);
+            }}
+            className="w-11/12 py-3 bg-primary hover:bg-primary/90 disabled:bg-slate-600 disabled:opacity-50 text-white rounded-2xl font-black text-xs uppercase tracking-wider transition-all transform translate-y-4 group-hover:translate-y-0 duration-300 delay-75 shadow-xl flex items-center justify-center gap-2 cursor-pointer active:scale-95"
+          >
+            <ShoppingCart size={14} /> কার্ডে অর্ডার করুন
+          </button>
+        </div>
       </div>
 
       {/* Content */}
@@ -107,16 +135,40 @@ const ProductCard = React.forwardRef<HTMLDivElement, ProductCardProps>(({
           {isInCart ? (
             <div className="flex items-center bg-slate-100 rounded-xl sm:rounded-2xl p-0.5 sm:p-1">
               <button 
-                onClick={() => onUpdateCartQuantity?.(product.id, -1)}
+                onClick={() => {
+                  onUpdateCartQuantity?.(product.id, -1);
+                  setTempQty('');
+                }}
                 className="p-1 sm:p-2 hover:bg-white rounded-lg sm:rounded-xl text-slate-600 transition-colors"
               >
                 <Minus size={14} className="sm:w-4 sm:h-4" />
               </button>
-              <span className="w-6 sm:w-8 text-center font-black text-xs sm:text-sm text-slate-800">
-                {cartQuantity}
-              </span>
+              <input 
+                type="number"
+                min="1"
+                max={product.stock || 9999}
+                className="w-8 sm:w-10 text-center font-black text-xs sm:text-sm text-slate-800 bg-transparent border-none p-0 focus:outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                value={tempQty !== '' ? tempQty : (cartQuantity || 1)}
+                onChange={(e) => {
+                  const valStr = e.target.value;
+                  setTempQty(valStr);
+                  const val = parseInt(valStr, 10);
+                  if (!isNaN(val) && val > 0) {
+                    onUpdateCartQuantity?.(product.id, 0, val);
+                  }
+                }}
+                onBlur={() => {
+                  setTempQty('');
+                  if (cartQuantity === undefined || cartQuantity < 1) {
+                    onUpdateCartQuantity?.(product.id, 0, 1);
+                  }
+                }}
+              />
               <button 
-                onClick={() => onUpdateCartQuantity?.(product.id, 1)}
+                onClick={() => {
+                  onUpdateCartQuantity?.(product.id, 1);
+                  setTempQty('');
+                }}
                 className="p-1 sm:p-2 hover:bg-white rounded-lg sm:rounded-xl text-slate-600 transition-colors"
               >
                 <Plus size={14} className="sm:w-4 sm:h-4" />

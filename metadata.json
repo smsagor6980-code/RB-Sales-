@@ -3,5 +3,8 @@
   "description": "A complete business management system with POS, Inventory, CRM, and E-commerce features.",
   "requestFramePermissions": [
     "camera"
+  ],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
   ]
 }

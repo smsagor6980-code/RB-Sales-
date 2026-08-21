@@ -22,6 +22,14 @@ export interface ShopSettings {
   email: string;
   address: string;
   currency: string;
+  logoUrl?: string;
+  headerTitle?: string;
+  headerSubtitle?: string;
+  headerTagline?: string;
+  headerBgColor?: string;
+  headerTextColor?: string;
+  headerSubtitleColor?: string;
+  logoWidth?: number;
   heroTitle?: string;
   heroSubtitle?: string;
   heroImageUrl?: string;
@@ -31,6 +39,13 @@ export interface ShopSettings {
   featuredCategories?: string[];
   showNewsletter?: boolean;
   showFeatures?: boolean;
+  sliderImages?: {
+    id: string;
+    imageUrl: string;
+    title?: string;
+    subtitle?: string;
+    active: boolean;
+  }[];
   luckyRewards?: {
     enabled: boolean;
     rewards: LuckyReward[];
@@ -50,7 +65,7 @@ export interface Product {
   wholesalePrice: number; // Wholesale Price
   distributorPrice: number; // Distributor Price
   dealerPrice?: number;
-  unit: 'pcs' | 'kg' | 'box' | 'pkt';
+  unit: 'pcs' | 'kg' | 'box' | 'pkt' | 'liter' | 'meter' | 'bag' | 'gm' | string;
   stock: number;
   minStock?: number;
   category: string;
@@ -58,12 +73,45 @@ export interface Product {
   imageUrl?: string;
   dateAdded: string;
   status?: 'active' | 'inactive';
+  productType?: 'finished_good' | 'raw_material';
+  rawMaterialCategory?: string;
+  supplierId?: string;
+  supplierName?: string;
+}
+
+export interface ProductionBatchItem {
+  rawMaterialId: string;
+  rawMaterialName: string;
+  quantity: number;
+  unit: string;
+  unitPrice: number;
+  totalCost: number;
+}
+
+export interface ProductionBatch {
+  id: string;
+  batchNo: string;
+  date: string;
+  producedProductId: string;
+  producedProductName: string;
+  producedQuantity: number;
+  unit: string;
+  unitProductionCost: number;
+  totalProducedValue: number;
+  rawMaterialsUsed: ProductionBatchItem[];
+  totalRawMaterialCost: number;
+  laborCost?: number;
+  otherCost?: number;
+  totalBatchCost: number;
+  notes?: string;
+  addedBy?: string;
 }
 
 export interface ProductCategory {
   id: string;
   name: string;
   slug: string;
+  imageUrl?: string;
 }
 
 export interface AppRole {
@@ -83,6 +131,11 @@ export interface CartItem {
   purchasePrice: number;
   total: number;
   priceType: 'retail' | 'wholesale' | 'distributor';
+  orderedQuantity?: number;
+  deliveredQuantity?: number;
+  undeliveredQuantity?: number;
+  deliveryStatus?: 'delivered' | 'undelivered' | 'partial' | 'pending';
+  shortageReason?: string;
 }
 
 export interface PurchaseItem {
@@ -92,19 +145,46 @@ export interface PurchaseItem {
   quantity: number;
   unitPrice: number;
   total: number;
+  productType?: 'finished_good' | 'raw_material';
+  unit?: string;
 }
 
 export interface Purchase {
   id: string;
   purchaseNo: string;
   supplierId: string;
+  supplierName?: string;
+  supplierPhone?: string;
   date: string;
   items: PurchaseItem[];
+  subtotal?: number;
+  discount?: number;
+  transportCost?: number;
+  tax?: number;
   total: number;
   paid: number;
   due: number;
+  paymentMethod?: string;
   status: 'paid' | 'due' | 'pending';
   notes?: string;
+  receivedBy?: string;
+  addedBy?: string;
+}
+
+export interface SupplierReturn {
+  id: string;
+  returnNo: string;
+  supplierId: string;
+  supplierName?: string;
+  date: string;
+  productId: string;
+  productName: string;
+  quantity: number;
+  unitPrice: number;
+  totalAmount: number;
+  refundType: 'reduce_due' | 'cash_refund';
+  reason: string;
+  addedBy?: string;
 }
 
 export interface CustomerReward {
@@ -155,6 +235,10 @@ export interface Customer {
   phone: string;
   email?: string;
   address?: string;
+  nameColor?: string;
+  imageUrl?: string;
+  photoUrl?: string;
+  profileColor?: string;
   dueAmount: number;
   type: 'retail' | 'wholesale' | 'distributor';
   status: string;
@@ -179,20 +263,36 @@ export interface Supplier {
   id: string;
   name: string;
   phone: string;
+  email?: string;
   companyName: string;
+  contactPerson?: string;
   address: string;
   dueAmount: number;
   dateAdded: string;
   totalPurchase: number;
+  status?: 'active' | 'inactive';
+  category?: string;
+  bankName?: string;
+  bankAccountNo?: string;
+  bankBranch?: string;
+  routingNo?: string;
+  bkashNo?: string;
+  nagadNo?: string;
+  notes?: string;
+  addedBy?: string;
 }
 
 export interface SupplierPayment {
   id: string;
+  voucherNo?: string;
   supplierId: string;
+  supplierName?: string;
   amount: number;
   method: string;
   date: string;
   note?: string;
+  chequeNo?: string;
+  transactionId?: string;
   addedBy?: string;
 }
 
@@ -228,6 +328,17 @@ export interface Staff {
     sick: number;
     annual: number;
   };
+  bkashNo?: string;
+  nagadNo?: string;
+  bankAccountNo?: string;
+  bankName?: string;
+  dutyStartTime?: string;
+  dutyEndTime?: string;
+  dutyHours?: number;
+  shiftName?: string;
+  pawnaTaka?: number;
+  openingAdvance?: number;
+  overtimeRatePerHour?: number;
 }
 
 export interface Attendance {
@@ -251,6 +362,15 @@ export interface LeaveRequest {
   appliedDate: string;
 }
 
+export interface PayrollPaymentRecord {
+  id: string;
+  amount: number;
+  date: string;
+  method: string;
+  note?: string;
+  paidBy?: string;
+}
+
 export interface Payroll {
   id: string;
   staffId: string;
@@ -262,19 +382,71 @@ export interface Payroll {
   overtime: number;
   deductions: number;
   netSalary: number;
-  status: 'Draft' | 'Paid';
+  status: 'Draft' | 'Paid' | 'Partial';
   paymentDate?: string;
+  paidAmount?: number;
+  dueAmount?: number;
+  paymentMethod?: string;
+  note?: string;
+  workedDays?: number;
+  totalDays?: number;
+  dailyRate?: number;
+  payments?: PayrollPaymentRecord[];
 }
 
 export interface AdvanceLoan {
   id: string;
   staffId: string;
+  applicantType?: 'customer' | 'staff';
+  customerId?: string;
+  customerName?: string;
+  customerPhone?: string;
+  customerAddress?: string;
+  loanType?: 'advance' | 'loan';
   amount: number;
   date: string;
+  dueDate?: string;
+  disbursedMethod?: string;
   reason: string;
   status: 'Pending' | 'Approved' | 'Rejected' | 'Paid';
   remainingAmount: number;
   installmentAmount: number;
+}
+
+export interface CustomerLoanRepayment {
+  id: string;
+  loanId: string;
+  amount: number;
+  date: string;
+  paymentMethod: string;
+  notes?: string;
+  collectedBy?: string;
+  collectedByName?: string;
+}
+
+export interface CustomerLoan {
+  id: string;
+  loanNo?: string;
+  customerId: string;
+  customerName: string;
+  customerPhone?: string;
+  customerAddress?: string;
+  type: 'loan' | 'advance';
+  amount: number;
+  remainingAmount: number;
+  installmentAmount?: number;
+  totalInstallments?: number;
+  interestRate?: number;
+  date: string;
+  dueDate?: string;
+  disbursedMethod: string;
+  purpose: string;
+  status: 'active' | 'repaid' | 'overdue' | 'cancelled';
+  repayments: CustomerLoanRepayment[];
+  notes?: string;
+  approvedBy?: string;
+  approvedByName?: string;
+  addedBy?: string;
 }
 
 export interface ExpenseReimbursement {
@@ -285,6 +457,17 @@ export interface ExpenseReimbursement {
   reason: string;
   attachmentUrl?: string;
   status: 'Pending' | 'Approved' | 'Rejected' | 'Paid';
+}
+
+export interface UndeliveredItemSummary {
+  productId: string;
+  productName: string;
+  orderedQuantity: number;
+  deliveredQuantity: number;
+  undeliveredQuantity: number;
+  unitPrice: number;
+  total: number;
+  shortageReason?: string;
 }
 
 export interface Sale {
@@ -305,12 +488,26 @@ export interface Sale {
   change: number;
   paymentMethod: string;
   notes?: string;
-  status: 'pending' | 'approved' | 'delivered' | 'cancelled' | 'due' | 'paid';
+  status: 'pending' | 'approved' | 'delivered' | 'cancelled' | 'due' | 'paid' | 'undelivered' | 'partial';
+  deliveryStatus?: 'delivered' | 'undelivered' | 'partial' | 'pending';
+  undeliveredNote?: string;
+  undeliveredItemsCount?: number;
+  deliveredAt?: string;
+  deliveredBy?: string;
   soldBy?: string;
   soldById?: string;
   customerName?: string;
   customerPhone?: string;
   customerAddress?: string;
+  originalInvoiceNo?: string;
+  isUndeliveredChallan?: boolean;
+  splitFromSaleId?: string;
+  undeliveredReason?: string;
+  vehicleNo?: string;
+  driverPhone?: string;
+  originalItems?: CartItem[];
+  undeliveredItems?: UndeliveredItemSummary[];
+  undeliveredInvoiceNo?: string;
 }
 
 export interface ProductReturn {
@@ -355,64 +552,9 @@ export interface StockEntry {
   date: string;
   addedBy?: string;
   note?: string;
-}
-
-export interface CustomerLoan {
-  id: string;
-  customerId: string;
-  customerName?: string;
-  amount: number;
-  date: string;
-  reason: string;
-  status: 'Pending' | 'Approved' | 'Rejected' | 'Paid';
-  remainingAmount: number;
-  installmentAmount: number;
-  addedBy?: string;
-}
-
-export interface CustomerLoanRepayment {
-  id: string;
-  loanId: string;
-  customerId: string;
-  amount: number;
-  date: string;
-  paymentMethod: string;
-  note?: string;
-  addedBy?: string;
-}
-
-export interface SupplierReturn {
-  id: string;
-  supplierId: string;
-  supplierName?: string;
-  productId: string;
-  productName: string;
-  quantity: number;
-  unitPrice: number;
-  totalAmount: number;
-  reason: string;
-  date: string;
-  addedBy?: string;
-}
-
-export interface ProductionBatch {
-  id: string;
-  batchNo: string;
-  producedProductName: string;
-  producedQuantity: number;
-  unit: string;
-  totalProducedValue: number;
-  date: string;
-  productId?: string;
-  productName?: string;
-  quantity?: number;
-  costPerUnit?: number;
-  totalCost?: number;
-  status?: 'planned' | 'in_progress' | 'completed';
-  startDate?: string;
-  completionDate?: string;
-  notes?: string;
-  addedBy?: string;
+  productType?: 'finished_good' | 'raw_material';
+  entryType?: 'purchase' | 'manual_add' | 'production_output' | 'production_consumed' | 'adjustment';
+  unit?: string;
 }
 
 export interface Activity {
@@ -423,4 +565,12 @@ export interface Activity {
   amount: number;
   date: string;
   addedBy?: string;
+}
+
+export function calculateLowStockAlerts(products: Product[]): Product[] {
+  return (products || []).filter(p => {
+    if (p.status === 'inactive') return false;
+    const minThreshold = p.minStock !== undefined && p.minStock !== null ? Number(p.minStock) : 5;
+    return Number(p.stock) <= minThreshold;
+  });
 }

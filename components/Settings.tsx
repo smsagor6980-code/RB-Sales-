@@ -11,8 +11,9 @@ import {
   Check, AlertCircle, Eye, EyeOff, Building2, UserCircle, Settings2,
   Store, MapPin, Database, RefreshCcw, Target, Percent, Briefcase,
   Unlock, ShieldAlert, Laptop, Layout, Users, Coins, ShoppingBag, Image, Bell, Truck,
-  ArrowDownToLine, CloudDownload, Zap
+  ArrowDownToLine, CloudDownload, Zap, Camera, Upload, Palette, Type
 } from 'lucide-react';
+import { HEADER_COLOR_PRESETS, HEADER_TEXT_COLOR_PRESETS, HEADER_SUBTITLE_COLOR_PRESETS } from './Layout';
 
 interface SettingsProps {
   staff: Staff[];
@@ -51,6 +52,50 @@ const Settings: React.FC<SettingsProps> = ({
   const [isMigrating, setIsMigrating] = useState(false);
   const [migrationStatus, setMigrationStatus] = useState<string | null>(null);
   const [migrationLog, setMigrationLog] = useState<string[]>([]);
+  const [isLogoUploading, setIsLogoUploading] = useState(false);
+
+  // Compress image to Base64
+  const compressImage = (file: File, maxWidth = 800, maxHeight = 400): Promise<string> => {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.readAsDataURL(file);
+      reader.onload = (event) => {
+        const img = new window.Image();
+        img.src = event.target?.result as string;
+        img.onload = () => {
+          const canvas = document.createElement('canvas');
+          let width = img.width;
+          let height = img.height;
+
+          if (width > height) {
+            if (width > maxWidth) {
+              height = Math.round((height * maxWidth) / width);
+              width = maxWidth;
+            }
+          } else {
+            if (height > maxHeight) {
+              width = Math.round((width * maxHeight) / height);
+              height = maxHeight;
+            }
+          }
+
+          canvas.width = width;
+          canvas.height = height;
+          const ctx = canvas.getContext('2d');
+          if (!ctx) {
+            resolve(event.target?.result as string);
+            return;
+          }
+
+          ctx.drawImage(img, 0, 0, width, height);
+          const dataUrl = canvas.toDataURL('image/png', 0.9);
+          resolve(dataUrl);
+        };
+        img.onerror = (err) => reject(err);
+      };
+      reader.onerror = (err) => reject(err);
+    });
+  };
 
   // Default shop settings if none provided
   const defaultShopData = {
@@ -104,6 +149,48 @@ const Settings: React.FC<SettingsProps> = ({
       }
     };
   });
+
+  const resizeImage = (file: File, maxWidth = 1000, maxHeight = 500): Promise<string> => {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.readAsDataURL(file);
+      reader.onload = (event) => {
+        const img = new window.Image();
+        img.src = event.target?.result as string;
+        img.onload = () => {
+          const canvas = document.createElement('canvas');
+          let width = img.width;
+          let height = img.height;
+
+          if (width > height) {
+            if (width > maxWidth) {
+              height = Math.round((height * maxWidth) / width);
+              width = maxWidth;
+            }
+          } else {
+            if (height > maxHeight) {
+              width = Math.round((width * maxHeight) / height);
+              height = maxHeight;
+            }
+          }
+
+          canvas.width = width;
+          canvas.height = height;
+          const ctx = canvas.getContext('2d');
+          if (!ctx) {
+            resolve(event.target?.result as string);
+            return;
+          }
+
+          ctx.drawImage(img, 0, 0, width, height);
+          const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
+          resolve(dataUrl);
+        };
+        img.onerror = (err) => reject(err);
+      };
+      reader.onerror = (err) => reject(err);
+    });
+  };
 
   const [userFormData, setUserFormData] = useState<Partial<Staff>>({
     name: '', designation: '', roleId: '', phone: '', email: '', password: '', 
@@ -678,7 +765,7 @@ const Settings: React.FC<SettingsProps> = ({
                         <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest ml-1">পুরস্কারের নাম</label>
                         <input 
                           className="w-full bg-white border-2 border-slate-100 rounded-xl px-3 py-2 text-xs font-bold outline-none focus:border-amber-500 transition-all"
-                          value={reward.value}
+                          value={reward.value || ''}
                           onChange={(e) => {
                             const updated = shopData.luckyRewards.rewards.map((r: any) => r.id === reward.id ? {...r, value: e.target.value} : r);
                             setShopData({...shopData, luckyRewards: {...shopData.luckyRewards, rewards: updated}});
@@ -690,7 +777,7 @@ const Settings: React.FC<SettingsProps> = ({
                           <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest ml-1">কুপন কোড</label>
                           <input 
                             className="w-full bg-white border-2 border-slate-100 rounded-xl px-3 py-2 text-xs font-mono font-bold outline-none focus:border-amber-500 transition-all uppercase"
-                            value={reward.code}
+                            value={reward.code || ''}
                             onChange={(e) => {
                               const updated = shopData.luckyRewards.rewards.map((r: any) => r.id === reward.id ? {...r, code: e.target.value.toUpperCase()} : r);
                               setShopData({...shopData, luckyRewards: {...shopData.luckyRewards, rewards: updated}});
@@ -702,7 +789,7 @@ const Settings: React.FC<SettingsProps> = ({
                           <input 
                             type="number"
                             className="w-full bg-white border-2 border-slate-100 rounded-xl px-3 py-2 text-xs font-bold outline-none focus:border-amber-500 transition-all"
-                            value={reward.chance}
+                            value={reward.chance || 0}
                             onChange={(e) => {
                               const updated = shopData.luckyRewards.rewards.map((r: any) => r.id === reward.id ? {...r, chance: parseInt(e.target.value) || 0} : r);
                               setShopData({...shopData, luckyRewards: {...shopData.luckyRewards, rewards: updated}});
@@ -778,7 +865,7 @@ const Settings: React.FC<SettingsProps> = ({
                           <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest ml-1">মাইলস্টোনের নাম</label>
                           <input 
                             className="w-full bg-white border-2 border-slate-100 rounded-xl px-4 py-3 text-sm font-black outline-none focus:border-indigo-500 transition-all"
-                            value={milestone.title}
+                            value={milestone.title || ''}
                             onChange={(e) => {
                               const updated = shopData.targetRewards.milestones.map((m: any) => m.id === milestone.id ? {...m, title: e.target.value} : m);
                               setShopData({...shopData, targetRewards: {...shopData.targetRewards, milestones: updated}});
@@ -789,7 +876,7 @@ const Settings: React.FC<SettingsProps> = ({
                           <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest ml-1">টার্গেট টাইপ</label>
                           <select 
                             className="w-full bg-white border-2 border-slate-100 rounded-xl px-4 py-3 text-sm font-black outline-none focus:border-indigo-500 transition-all appearance-none"
-                            value={milestone.type}
+                            value={milestone.type || ''}
                             onChange={(e) => {
                               const updated = shopData.targetRewards.milestones.map((m: any) => m.id === milestone.id ? {...m, type: e.target.value} : m);
                               setShopData({...shopData, targetRewards: {...shopData.targetRewards, milestones: updated}});
@@ -806,7 +893,7 @@ const Settings: React.FC<SettingsProps> = ({
                           <input 
                             type="number"
                             className="w-full bg-white border-2 border-slate-100 rounded-xl px-4 py-3 text-sm font-black outline-none focus:border-indigo-500 transition-all"
-                            value={milestone.target}
+                            value={milestone.target || 0}
                             onChange={(e) => {
                               const updated = shopData.targetRewards.milestones.map((m: any) => m.id === milestone.id ? {...m, target: parseInt(e.target.value) || 0} : m);
                               setShopData({...shopData, targetRewards: {...shopData.targetRewards, milestones: updated}});
@@ -817,7 +904,7 @@ const Settings: React.FC<SettingsProps> = ({
                           <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest ml-1">পুরস্কারের বিবরণ</label>
                           <input 
                             className="w-full bg-white border-2 border-slate-100 rounded-xl px-4 py-3 text-sm font-black outline-none focus:border-indigo-500 transition-all"
-                            value={milestone.reward}
+                            value={milestone.reward || ''}
                             onChange={(e) => {
                               const updated = shopData.targetRewards.milestones.map((m: any) => m.id === milestone.id ? {...m, reward: e.target.value} : m);
                               setShopData({...shopData, targetRewards: {...shopData.targetRewards, milestones: updated}});
@@ -830,7 +917,7 @@ const Settings: React.FC<SettingsProps> = ({
                        <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest ml-1">গ্রাহকের জন্য বিবরণ</label>
                        <input 
                           className="w-full bg-white border-2 border-slate-100 rounded-xl px-4 py-3 text-xs font-bold outline-none focus:border-indigo-500 transition-all"
-                          value={milestone.desc}
+                          value={milestone.desc || ''}
                           onChange={(e) => {
                             const updated = shopData.targetRewards.milestones.map((m: any) => m.id === milestone.id ? {...m, desc: e.target.value} : m);
                             setShopData({...shopData, targetRewards: {...shopData.targetRewards, milestones: updated}});
@@ -922,6 +1009,113 @@ const Settings: React.FC<SettingsProps> = ({
                 </div>
               </div>
 
+              {/* Promo Image Slider Config */}
+              <div className="space-y-8 border-t-2 border-slate-50 pt-8">
+                <div className="flex justify-between items-center border-b pb-2">
+                  <h4 className="text-[11px] font-black text-slate-900 uppercase tracking-widest flex items-center gap-2">
+                    <Layout size={14}/> Promotional Banner Slider & Offers
+                  </h4>
+                  <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">হোম পেজ স্লাইডার</span>
+                </div>
+                
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
+                  {(shopData.sliderImages || []).map((slide: any, index: number) => (
+                    <div key={slide.id || index} className="bg-slate-50 p-6 rounded-[32px] border-2 border-slate-100 hover:border-indigo-300 transition-all relative group flex flex-col justify-between">
+                      <button 
+                        onClick={() => {
+                          const updated = (shopData.sliderImages || []).filter((s: any) => s.id !== slide.id);
+                          setShopData({...shopData, sliderImages: updated});
+                        }}
+                        className="absolute top-4 right-4 p-2 bg-rose-50 text-rose-500 rounded-xl hover:bg-rose-100 transition-colors z-10 shadow-sm"
+                        title="স্লাইড মুছুন"
+                      >
+                        <Trash2 size={16}/>
+                      </button>
+
+                      <div>
+                        <div className="aspect-[2/1] rounded-2xl border border-slate-200 overflow-hidden bg-slate-100 mb-4 relative">
+                          <img src={slide.imageUrl} alt={slide.title || 'Slide'} className="w-full h-full object-cover" />
+                          <div className="absolute bottom-2 left-2 bg-black/60 backdrop-blur-sm text-white text-[8px] font-bold px-2 py-0.5 rounded uppercase tracking-wider">
+                            স্লাইড {index + 1}
+                          </div>
+                        </div>
+
+                        <div className="space-y-3">
+                          <div>
+                            <label className="text-[8px] font-black text-slate-400 uppercase tracking-widest ml-1">স্লাইড টাইটেল (ঐচ্ছিক)</label>
+                            <input 
+                              className="w-full bg-white border border-slate-100 rounded-xl px-3 py-2 text-xs font-bold outline-none focus:border-indigo-500 transition-all"
+                              placeholder="অফারের শিরোনাম লিখুন"
+                              value={slide.title || ''}
+                              onChange={(e) => {
+                                const updated = (shopData.sliderImages || []).map((s: any) => s.id === slide.id ? {...s, title: e.target.value} : s);
+                                setShopData({...shopData, sliderImages: updated});
+                              }}
+                            />
+                          </div>
+                          <div>
+                            <label className="text-[8px] font-black text-slate-400 uppercase tracking-widest ml-1">সাবটাইটেল (ঐচ্ছিক)</label>
+                            <input 
+                              className="w-full bg-white border border-slate-100 rounded-xl px-3 py-2 text-xs font-bold outline-none focus:border-indigo-500 transition-all"
+                              placeholder="অফারের বিবরণ বা ডিসকাউন্ট"
+                              value={slide.subtitle || ''}
+                              onChange={(e) => {
+                                const updated = (shopData.sliderImages || []).map((s: any) => s.id === slide.id ? {...s, subtitle: e.target.value} : s);
+                                setShopData({...shopData, sliderImages: updated});
+                              }}
+                            />
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center justify-between pt-4 mt-4 border-t border-slate-100">
+                        <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">স্ট্যাটাস: {slide.active ? 'সক্রিয়' : 'নিষ্ক্রিয়'}</span>
+                        <button 
+                          onClick={() => {
+                            const updated = (shopData.sliderImages || []).map((s: any) => s.id === slide.id ? {...s, active: !s.active} : s);
+                            setShopData({...shopData, sliderImages: updated});
+                          }}
+                          className={`w-10 h-6 rounded-full transition-all duration-300 flex items-center p-0.5 shadow-inner ${slide.active ? 'bg-emerald-500' : 'bg-slate-300'}`}
+                        >
+                          <div className={`w-5 h-5 bg-white rounded-full shadow-md transition-all duration-300 transform ${slide.active ? 'translate-x-4' : ''}`}></div>
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+
+                  <div className="bg-slate-50 p-6 rounded-[32px] border-2 border-dashed border-slate-200 flex flex-col items-center justify-center text-center min-h-[260px] hover:bg-white hover:border-indigo-300 transition-all group relative cursor-pointer">
+                    <input 
+                      type="file" 
+                      accept="image/*" 
+                      className="absolute inset-0 opacity-0 cursor-pointer"
+                      onChange={async (e) => {
+                        const file = e.target.files?.[0];
+                        if (!file) return;
+                        try {
+                          const base64 = await resizeImage(file, 1000, 500);
+                          const newSlide = {
+                            id: `SL-${Date.now()}`,
+                            imageUrl: base64,
+                            title: 'নতুন অফার',
+                            subtitle: 'বিশেষ ছাড় উপভোগ করুন',
+                            active: true
+                          };
+                          const currentSlides = shopData.sliderImages || [];
+                          setShopData({...shopData, sliderImages: [...currentSlides, newSlide]});
+                        } catch (err) {
+                          console.error("Banner upload error", err);
+                        }
+                      }}
+                    />
+                    <div className="w-12 h-12 rounded-full bg-white border border-slate-100 flex items-center justify-center text-slate-300 group-hover:text-indigo-600 group-hover:scale-110 transition-all shadow-sm">
+                      <Plus size={24}/>
+                    </div>
+                    <p className="text-xs font-black text-slate-800 uppercase tracking-tighter mt-3">নতুন ব্যানার এড করুন</p>
+                    <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest mt-1">ক্লিক করে ছবি আপলোড করুন</p>
+                  </div>
+                </div>
+              </div>
+
               {/* Logistics Config */}
               <div className="space-y-8">
                 <h4 className="text-[11px] font-black text-slate-900 uppercase tracking-widest border-b pb-2 flex items-center gap-2"><Truck size={14}/> Logistics & Rules</h4>
@@ -992,41 +1186,428 @@ const Settings: React.FC<SettingsProps> = ({
 
       {/* ----------------- General Settings Tab ----------------- */}
       {activeTab === 'general' && (
-        <div className="max-w-4xl mx-auto animate-in slide-in-from-bottom-4">
+        <div className="max-w-4xl mx-auto animate-in slide-in-from-bottom-4 space-y-8">
+          {/* Header Branding & Logo Section */}
           <div className="bg-white rounded-[48px] border-2 border-slate-100 shadow-sm overflow-hidden">
-             <div className="p-10 border-b-2 border-slate-50 flex items-center gap-5">
-                <div className="bg-primary/10 p-4 rounded-3xl text-primary"><Store size={32}/></div>
-                <div>
-                   <h3 className="text-xl font-black text-slate-900 uppercase tracking-tight">Shop Identity</h3>
-                   <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Branding & Logistics</p>
+             <div className="p-8 md:p-10 border-b-2 border-slate-50 flex items-center justify-between">
+                <div className="flex items-center gap-5">
+                  <div className="bg-amber-400/20 p-4 rounded-3xl text-amber-600">
+                    <Camera size={32}/>
+                  </div>
+                  <div>
+                     <h3 className="text-xl font-black text-slate-900 uppercase tracking-tight">হেডার ব্র্যান্ডিং, কালার ও লোগো</h3>
+                     <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Header Color, Logo, Title & Tagline</p>
+                  </div>
+                </div>
+                {shopData.logoUrl && (
+                  <button 
+                    type="button" 
+                    onClick={() => setShopData({ ...shopData, logoUrl: '' })}
+                    className="px-4 py-2 bg-rose-50 hover:bg-rose-100 text-rose-600 rounded-xl text-xs font-black transition-colors flex items-center gap-1.5"
+                  >
+                    <Trash2 size={14} /> লোগো মুছুন
+                  </button>
+                )}
+             </div>
+
+             <div className="p-8 md:p-12 space-y-8">
+                {/* Live Header Bar Preview */}
+                <div className="space-y-2">
+                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-1.5">
+                    <Sparkles size={14} className="text-amber-500" />
+                    হেডারের লাইভ প্রিভিউ (Live Header Preview)
+                  </label>
+                  {(() => {
+                    const activePreset = HEADER_COLOR_PRESETS.find(p => p.bg.toLowerCase() === (shopData.headerBgColor || '#1e1e5f').toLowerCase());
+                    const bgGrad = activePreset ? activePreset.gradient : 'from-[#111836] via-[#1e1e5f] to-[#16164a]';
+                    const customStyle = !activePreset ? { backgroundColor: shopData.headerBgColor || '#1e1e5f' } : undefined;
+                    return (
+                      <div 
+                        style={customStyle}
+                        className={`bg-gradient-to-r ${bgGrad} p-4 sm:p-5 rounded-3xl border border-white/20 flex items-center justify-between shadow-md transition-all duration-300`}
+                      >
+                        <div className="flex items-center gap-3">
+                          {shopData.logoUrl ? (
+                            <div className="h-10 sm:h-12 max-w-[140px] sm:max-w-[180px] bg-white rounded-2xl p-1.5 shadow-sm border border-white/20 flex items-center justify-center overflow-hidden">
+                              <img src={shopData.logoUrl} alt="Logo" className="max-h-full w-auto object-contain" />
+                            </div>
+                          ) : (
+                            <div className="bg-gradient-to-tr from-amber-400 to-amber-300 text-slate-950 p-2.5 rounded-2xl shadow-lg shadow-amber-500/20">
+                              <Store size={22} strokeWidth={3} />
+                            </div>
+                          )}
+                          <div className="flex flex-col">
+                            <h4 
+                              style={{ color: shopData.headerTextColor || '#ffffff' }}
+                              className="text-base sm:text-lg font-black tracking-tight uppercase leading-tight drop-shadow-[0_2px_4px_rgba(0,0,0,0.6)]"
+                            >
+                              {shopData.headerTitle || shopData.name || 'REST BAZER'}
+                            </h4>
+                            {shopData.headerSubtitle && (
+                              <span 
+                                style={{ color: shopData.headerSubtitleColor || '#fcd34d' }}
+                                className="text-[10px] sm:text-xs font-bold tracking-wider drop-shadow-[0_1px_2px_rgba(0,0,0,0.5)]"
+                              >
+                                {shopData.headerSubtitle}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                        <span className="text-[10px] font-black bg-white/10 text-amber-300 px-3 py-1 rounded-xl border border-white/10 hidden xs:inline-block">
+                          হেডার বার
+                        </span>
+                      </div>
+                    );
+                  })()}
+                </div>
+
+                {/* Header Color Theme Selector */}
+                <div className="space-y-3 pt-2">
+                  <label className="text-[10px] font-black text-slate-600 uppercase tracking-widest flex items-center gap-1.5 ml-1">
+                    <Palette size={14} className="text-indigo-600" />
+                    ১. হেডার ব্যাকগ্রাউন্ড কালার (Header Background Color)
+                  </label>
+
+                  {/* Presets Grid */}
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                    {HEADER_COLOR_PRESETS.map((preset) => {
+                      const isSelected = (shopData.headerBgColor || '#1e1e5f').toLowerCase() === preset.bg.toLowerCase();
+                      return (
+                        <button
+                          key={preset.id}
+                          type="button"
+                          onClick={() => setShopData({ ...shopData, headerBgColor: preset.bg })}
+                          className={`flex items-center gap-2.5 p-3 rounded-2xl border text-left transition-all ${
+                            isSelected 
+                              ? 'border-indigo-600 bg-indigo-50/70 ring-2 ring-indigo-500/20 shadow-xs' 
+                              : 'border-slate-200 bg-slate-50 hover:bg-slate-100 hover:border-slate-300'
+                          }`}
+                        >
+                          <div 
+                            className="w-5 h-5 rounded-full shrink-0 shadow-xs border border-white/40"
+                            style={{ backgroundColor: preset.bg }}
+                          />
+                          <span className={`text-xs font-black truncate ${isSelected ? 'text-indigo-950' : 'text-slate-700'}`}>
+                            {preset.label}
+                          </span>
+                          {isSelected && <Check size={14} className="text-indigo-600 ml-auto shrink-0" />}
+                        </button>
+                      );
+                    })}
+                  </div>
+
+                  {/* Custom Color Input */}
+                  <div className="flex items-center gap-3 pt-2 bg-slate-50 p-3.5 rounded-2xl border border-slate-100">
+                    <label className="text-xs font-black text-slate-700 whitespace-nowrap">
+                      কাস্টম ব্যাকগ্রাউন্ড:
+                    </label>
+                    <input
+                      type="color"
+                      value={shopData.headerBgColor?.startsWith('#') ? shopData.headerBgColor : '#1e1e5f'}
+                      onChange={(e) => setShopData({ ...shopData, headerBgColor: e.target.value })}
+                      className="w-9 h-9 rounded-xl cursor-pointer border border-slate-200 p-0.5 bg-white shadow-xs"
+                      title="কালার নির্বাচন করুন"
+                    />
+                    <input
+                      type="text"
+                      value={shopData.headerBgColor || ''}
+                      onChange={(e) => setShopData({ ...shopData, headerBgColor: e.target.value })}
+                      placeholder="#1e1e5f"
+                      className="w-28 bg-white border border-slate-200 rounded-xl px-3 py-1.5 text-xs font-mono font-bold text-slate-800 outline-none focus:border-indigo-500"
+                    />
+                    <span className="text-[10px] text-slate-400 font-bold ml-auto hidden sm:inline">
+                      হেক্স কোড বা কালার বক্স থেকে আপনার পছন্দের কালার সেট করুন
+                    </span>
+                  </div>
+                </div>
+
+                {/* Header Font Colors Section */}
+                <div className="space-y-4 pt-4 border-t border-slate-100">
+                  <div className="flex items-center justify-between">
+                    <label className="text-[10px] font-black text-slate-700 uppercase tracking-widest flex items-center gap-1.5 ml-1">
+                      <Type size={14} className="text-amber-500" />
+                      ২. হেডার ফন্ট ও লেখার কালার (Header Font & Text Colors)
+                    </label>
+                    <button
+                      type="button"
+                      onClick={() => setShopData({ ...shopData, headerTextColor: '#ffffff', headerSubtitleColor: '#fcd34d' })}
+                      className="text-[10px] font-bold text-indigo-600 hover:text-indigo-800 hover:underline"
+                    >
+                      ডিফল্ট ফন্ট কালার সেট করুন
+                    </button>
+                  </div>
+
+                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                    {/* Main Title Font Color */}
+                    <div className="bg-slate-50 p-4 rounded-3xl border border-slate-200/80 space-y-3">
+                      <div className="flex items-center justify-between">
+                        <label className="text-xs font-black text-slate-800 flex items-center gap-1.5">
+                          <span className="w-2 h-2 rounded-full bg-indigo-600"></span>
+                          মূল নামের ফন্ট কালার (Title Font Color)
+                        </label>
+                        <span 
+                          className="text-xs font-black font-mono px-2 py-0.5 rounded-lg border border-slate-200 shadow-2xs"
+                          style={{ backgroundColor: shopData.headerTextColor || '#ffffff', color: (shopData.headerTextColor === '#ffffff' || shopData.headerTextColor === '#fde047' || shopData.headerTextColor === '#67e8f9' || shopData.headerTextColor === '#86efac' || shopData.headerTextColor === '#fbcfe8' || shopData.headerTextColor === '#fed7aa' || shopData.headerTextColor === '#f1f5f9') ? '#0f172a' : '#ffffff' }}
+                        >
+                          {shopData.headerTextColor || '#ffffff'}
+                        </span>
+                      </div>
+
+                      {/* Text Presets */}
+                      <div className="grid grid-cols-4 gap-2">
+                        {HEADER_TEXT_COLOR_PRESETS.map((preset) => {
+                          const isSelected = (shopData.headerTextColor || '#ffffff').toLowerCase() === preset.color.toLowerCase();
+                          return (
+                            <button
+                              key={preset.id}
+                              type="button"
+                              onClick={() => setShopData({ ...shopData, headerTextColor: preset.color })}
+                              title={preset.label}
+                              className={`h-9 rounded-xl flex items-center justify-center border transition-all ${
+                                isSelected 
+                                  ? 'ring-2 ring-indigo-500 ring-offset-1 scale-105 border-indigo-600 shadow-xs' 
+                                  : 'border-slate-300 hover:scale-102 hover:border-slate-400'
+                              }`}
+                              style={{ backgroundColor: preset.color }}
+                            >
+                              {isSelected && (
+                                <Check 
+                                  size={14} 
+                                  className={preset.color === '#ffffff' || preset.color === '#fde047' || preset.color === '#67e8f9' || preset.color === '#86efac' || preset.color === '#fbcfe8' || preset.color === '#fed7aa' || preset.color === '#f1f5f9' ? 'text-slate-900' : 'text-white'} 
+                                />
+                              )}
+                            </button>
+                          );
+                        })}
+                      </div>
+
+                      {/* Title Custom Color Picker */}
+                      <div className="flex items-center gap-2.5 pt-1">
+                        <label className="text-[10px] font-bold text-slate-500 whitespace-nowrap">
+                          কাস্টম ফন্ট কালার:
+                        </label>
+                        <input
+                          type="color"
+                          value={shopData.headerTextColor?.startsWith('#') ? shopData.headerTextColor : '#ffffff'}
+                          onChange={(e) => setShopData({ ...shopData, headerTextColor: e.target.value })}
+                          className="w-8 h-8 rounded-xl cursor-pointer border border-slate-300 p-0.5 bg-white shadow-2xs"
+                          title="টাইটেলের ফন্ট কালার বাছুন"
+                        />
+                        <input
+                          type="text"
+                          value={shopData.headerTextColor || ''}
+                          onChange={(e) => setShopData({ ...shopData, headerTextColor: e.target.value })}
+                          placeholder="#ffffff"
+                          className="w-24 bg-white border border-slate-200 rounded-xl px-2.5 py-1 text-xs font-mono font-bold text-slate-800 outline-none focus:border-indigo-500"
+                        />
+                      </div>
+                    </div>
+
+                    {/* Subtitle Font Color */}
+                    <div className="bg-slate-50 p-4 rounded-3xl border border-slate-200/80 space-y-3">
+                      <div className="flex items-center justify-between">
+                        <label className="text-xs font-black text-slate-800 flex items-center gap-1.5">
+                          <span className="w-2 h-2 rounded-full bg-amber-500"></span>
+                          সাবটাইটেল ফন্ট কালার (Subtitle Font Color)
+                        </label>
+                        <span 
+                          className="text-xs font-black font-mono px-2 py-0.5 rounded-lg border border-slate-200 shadow-2xs"
+                          style={{ backgroundColor: shopData.headerSubtitleColor || '#fcd34d', color: (shopData.headerSubtitleColor === '#ffffff' || shopData.headerSubtitleColor === '#f8fafc' || shopData.headerSubtitleColor === '#fcd34d' || shopData.headerSubtitleColor === '#93c5fd' || shopData.headerSubtitleColor === '#a7f3d0' || shopData.headerSubtitleColor === '#cbd5e1' || shopData.headerSubtitleColor === '#f472b6' || shopData.headerSubtitleColor === '#fed7aa') ? '#0f172a' : '#ffffff' }}
+                        >
+                          {shopData.headerSubtitleColor || '#fcd34d'}
+                        </span>
+                      </div>
+
+                      {/* Subtitle Presets */}
+                      <div className="grid grid-cols-4 gap-2">
+                        {HEADER_SUBTITLE_COLOR_PRESETS.map((preset) => {
+                          const isSelected = (shopData.headerSubtitleColor || '#fcd34d').toLowerCase() === preset.color.toLowerCase();
+                          return (
+                            <button
+                              key={preset.id}
+                              type="button"
+                              onClick={() => setShopData({ ...shopData, headerSubtitleColor: preset.color })}
+                              title={preset.label}
+                              className={`h-9 rounded-xl flex items-center justify-center border transition-all ${
+                                isSelected 
+                                  ? 'ring-2 ring-amber-500 ring-offset-1 scale-105 border-amber-600 shadow-xs' 
+                                  : 'border-slate-300 hover:scale-102 hover:border-slate-400'
+                              }`}
+                              style={{ backgroundColor: preset.color }}
+                            >
+                              {isSelected && (
+                                <Check 
+                                  size={14} 
+                                  className={preset.color === '#ffffff' || preset.color === '#f8fafc' || preset.color === '#fcd34d' || preset.color === '#93c5fd' || preset.color === '#a7f3d0' || preset.color === '#cbd5e1' || preset.color === '#f472b6' || preset.color === '#fed7aa' ? 'text-slate-900' : 'text-white'} 
+                                />
+                              )}
+                            </button>
+                          );
+                        })}
+                      </div>
+
+                      {/* Subtitle Custom Color Picker */}
+                      <div className="flex items-center gap-2.5 pt-1">
+                        <label className="text-[10px] font-bold text-slate-500 whitespace-nowrap">
+                          কাস্টম সাবটাইটেল কালার:
+                        </label>
+                        <input
+                          type="color"
+                          value={shopData.headerSubtitleColor?.startsWith('#') ? shopData.headerSubtitleColor : '#fcd34d'}
+                          onChange={(e) => setShopData({ ...shopData, headerSubtitleColor: e.target.value })}
+                          className="w-8 h-8 rounded-xl cursor-pointer border border-slate-300 p-0.5 bg-white shadow-2xs"
+                          title="সাবটাইটেলের ফন্ট কালার বাছুন"
+                        />
+                        <input
+                          type="text"
+                          value={shopData.headerSubtitleColor || ''}
+                          onChange={(e) => setShopData({ ...shopData, headerSubtitleColor: e.target.value })}
+                          placeholder="#fcd34d"
+                          className="w-24 bg-white border border-slate-200 rounded-xl px-2.5 py-1 text-xs font-mono font-bold text-slate-800 outline-none focus:border-amber-500"
+                        />
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Logo Upload Box */}
+                <div className="space-y-3 pt-2 border-t border-slate-100">
+                  <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">
+                    ৩. হেডার লোগো আপলোড (Upload Logo)
+                  </label>
+                  
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6 items-center">
+                    <label className={`border-2 border-dashed rounded-3xl p-6 flex flex-col items-center justify-center text-center cursor-pointer transition-all ${
+                      shopData.logoUrl ? 'border-emerald-300 bg-emerald-50/30 hover:bg-emerald-50/60' : 'border-slate-200 bg-slate-50 hover:bg-indigo-50/50 hover:border-indigo-300'
+                    }`}>
+                      <input 
+                        type="file" 
+                        accept="image/png, image/jpeg, image/webp, image/svg+xml" 
+                        className="hidden" 
+                        onChange={async (e) => {
+                          const file = e.target.files?.[0];
+                          if (!file) return;
+                          setIsLogoUploading(true);
+                          try {
+                            const base64 = await compressImage(file, 600, 300);
+                            setShopData(prev => ({ ...prev, logoUrl: base64 }));
+                          } catch (err) {
+                            console.error("Logo upload error:", err);
+                            alert("লোগো আপলোড ব্যর্থ হয়েছে।");
+                          } finally {
+                            setIsLogoUploading(false);
+                          }
+                        }} 
+                      />
+
+                      {isLogoUploading ? (
+                        <div className="py-2 flex flex-col items-center gap-2 text-indigo-600">
+                          <div className="w-8 h-8 border-3 border-indigo-600 border-t-transparent rounded-full animate-spin"></div>
+                          <span className="text-xs font-black">আপলোড হচ্ছে...</span>
+                        </div>
+                      ) : shopData.logoUrl ? (
+                        <div className="flex flex-col items-center gap-2">
+                          <div className="h-14 max-w-[180px] p-2 bg-white rounded-xl border border-emerald-200 shadow-xs flex items-center justify-center overflow-hidden">
+                            <img src={shopData.logoUrl} alt="Logo" className="max-h-full w-auto object-contain" />
+                          </div>
+                          <span className="text-[11px] font-black text-emerald-600 flex items-center gap-1">
+                            <Check size={14} /> লোগো সংযুক্ত রয়েছে (ক্লিক করে পরিবর্তন করুন)
+                          </span>
+                        </div>
+                      ) : (
+                        <div className="flex flex-col items-center gap-2">
+                          <div className="w-12 h-12 rounded-2xl bg-indigo-50 text-indigo-600 flex items-center justify-center">
+                            <Upload size={22} />
+                          </div>
+                          <p className="text-xs font-black text-slate-800">লোগো ছবি নির্বাচন করুন</p>
+                          <p className="text-[10px] font-bold text-slate-400">PNG, JPG, WebP ফরম্যাট</p>
+                        </div>
+                      )}
+                    </label>
+
+                    {/* Direct URL input */}
+                    <div className="space-y-2">
+                      <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">
+                        অথবা লোগো ইমেজ লিঙ্ক (Image URL)
+                      </label>
+                      <input 
+                        type="url"
+                        className="w-full border-2 border-slate-100 rounded-2xl p-4 font-bold text-xs bg-slate-50 outline-none focus:bg-white focus:ring-4 focus:ring-primary/5 transition-all"
+                        placeholder="https://example.com/logo.png"
+                        value={shopData.logoUrl?.startsWith('data:') ? '' : (shopData.logoUrl || '')}
+                        onChange={e => setShopData({ ...shopData, logoUrl: e.target.value })}
+                      />
+                      <p className="text-[10px] text-slate-400 font-bold ml-1">যেকোনো ওয়েব লিঙ্ক থেকেও লোগো লোড করতে পারবেন</p>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Header Text & Subtitle inputs */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6 pt-4 border-t border-slate-100">
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-black text-slate-600 uppercase tracking-widest ml-1">
+                      ৪. হেডারের মূল নাম (Header Title)
+                    </label>
+                    <input 
+                      className="w-full border-2 border-slate-100 rounded-2xl p-4 font-black text-sm bg-slate-50 outline-none focus:bg-white focus:ring-4 focus:ring-primary/5 transition-all uppercase" 
+                      placeholder="যেমন: RB SHAD FOOD PRODUCT LTD"
+                      value={shopData.headerTitle !== undefined ? shopData.headerTitle : (shopData.name || '')} 
+                      onChange={e => setShopData({ ...shopData, headerTitle: e.target.value, name: e.target.value })} 
+                    />
+                    <p className="text-[10px] text-slate-400 font-bold ml-1">লোগোর পাশে হেডারে বড় করে প্রদর্শিত হবে</p>
+                  </div>
+
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-black text-slate-600 uppercase tracking-widest ml-1">
+                      ৫. লোগোর পাশের সাবটাইটেল (Subtitle / Tagline)
+                    </label>
+                    <input 
+                      className="w-full border-2 border-slate-100 rounded-2xl p-4 font-bold text-sm bg-slate-50 outline-none focus:bg-white focus:ring-4 focus:ring-primary/5 transition-all" 
+                      placeholder="যেমন: Food & Agro Industries বা ERP Solution"
+                      value={shopData.headerSubtitle || ''} 
+                      onChange={e => setShopData({ ...shopData, headerSubtitle: e.target.value })} 
+                    />
+                    <p className="text-[10px] text-slate-400 font-bold ml-1">লোগো বা নামের ঠিক নিচে স্লোগান হিসেবে দেখাবে</p>
+                  </div>
                 </div>
              </div>
-             <div className="p-12 space-y-10">
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-10">
+          </div>
+
+          {/* Shop Identity & Logistics */}
+          <div className="bg-white rounded-[48px] border-2 border-slate-100 shadow-sm overflow-hidden">
+             <div className="p-8 md:p-10 border-b-2 border-slate-50 flex items-center gap-5">
+                <div className="bg-primary/10 p-4 rounded-3xl text-primary"><Store size={32}/></div>
+                <div>
+                   <h3 className="text-xl font-black text-slate-900 uppercase tracking-tight">Shop Identity & Logistics</h3>
+                   <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Business details for Invoices and CRM</p>
+                </div>
+             </div>
+             <div className="p-8 md:p-12 space-y-8">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
                    <div className="space-y-3">
-                      <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">Business Name</label>
-                      <input className="w-full border-2 border-slate-100 rounded-2xl p-4.5 font-black text-base bg-slate-50 outline-none focus:bg-white focus:ring-4 focus:ring-primary/5 transition-all" value={shopData.name || ''} onChange={e => setShopData({...shopData, name: e.target.value})} />
+                      <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">Business Name (ইনভয়েসের নাম)</label>
+                      <input className="w-full border-2 border-slate-100 rounded-2xl p-4 font-black text-base bg-slate-50 outline-none focus:bg-white focus:ring-4 focus:ring-primary/5 transition-all" value={shopData.name || ''} onChange={e => setShopData({...shopData, name: e.target.value})} />
                    </div>
                    <div className="space-y-3">
                       <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">Contact Hotline</label>
-                      <input className="w-full border-2 border-slate-100 rounded-2xl p-4.5 font-black text-base bg-slate-50 outline-none focus:bg-white focus:ring-4 focus:ring-primary/5 transition-all" value={shopData.phone || ''} onChange={e => setShopData({...shopData, phone: e.target.value})} />
+                      <input className="w-full border-2 border-slate-100 rounded-2xl p-4 font-black text-base bg-slate-50 outline-none focus:bg-white focus:ring-4 focus:ring-primary/5 transition-all" value={shopData.phone || ''} onChange={e => setShopData({...shopData, phone: e.target.value})} />
                    </div>
                    <div className="space-y-3">
                       <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">Support Email</label>
-                      <input className="w-full border-2 border-slate-100 rounded-2xl p-4.5 font-black text-base bg-slate-50 outline-none focus:bg-white focus:ring-4 focus:ring-primary/5 transition-all" value={shopData.email || ''} onChange={e => setShopData({...shopData, email: e.target.value})} />
+                      <input className="w-full border-2 border-slate-100 rounded-2xl p-4 font-black text-base bg-slate-50 outline-none focus:bg-white focus:ring-4 focus:ring-primary/5 transition-all" value={shopData.email || ''} onChange={e => setShopData({...shopData, email: e.target.value})} />
                    </div>
                    <div className="space-y-3">
                       <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">Local Currency Symbol</label>
-                      <input className="w-full border-2 border-slate-100 rounded-2xl p-4.5 font-black text-2xl text-primary bg-slate-50 outline-none focus:bg-white transition-all text-center max-w-[100px]" value={shopData.currency || ''} onChange={e => setShopData({...shopData, currency: e.target.value})} />
+                      <input className="w-full border-2 border-slate-100 rounded-2xl p-4 font-black text-2xl text-primary bg-slate-50 outline-none focus:bg-white transition-all text-center max-w-[100px]" value={shopData.currency || ''} onChange={e => setShopData({...shopData, currency: e.target.value})} />
                    </div>
                 </div>
                 <div className="space-y-3">
                    <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">Official Address</label>
-                   <textarea rows={3} className="w-full border-2 border-slate-100 rounded-2xl p-4.5 font-black text-base bg-slate-50 outline-none focus:bg-white focus:ring-4 focus:ring-primary/5 transition-all" value={shopData.address || ''} onChange={e => setShopData({...shopData, address: e.target.value})} />
+                   <textarea rows={3} className="w-full border-2 border-slate-100 rounded-2xl p-4 font-black text-base bg-slate-50 outline-none focus:bg-white focus:ring-4 focus:ring-primary/5 transition-all" value={shopData.address || ''} onChange={e => setShopData({...shopData, address: e.target.value})} />
                 </div>
                 <div className="pt-6 border-t-2 border-slate-50">
-                   <button onClick={() => onUpdateShopSettings(shopData)} className="w-full bg-primary text-white py-6 rounded-[28px] font-black uppercase text-sm tracking-[4px] shadow-2xl shadow-primary/30 active:scale-[0.98] transition-all flex items-center justify-center gap-4">
-                      <Save size={24}/> Propagate System Changes
+                   <button onClick={() => onUpdateShopSettings(shopData)} className="w-full bg-primary text-white py-5 rounded-[28px] font-black uppercase text-sm tracking-[4px] shadow-2xl shadow-primary/30 active:scale-[0.98] transition-all flex items-center justify-center gap-4">
+                      <Save size={22}/> সব পরিবর্তন সংরক্ষণ করুন (Save All Settings)
                    </button>
                 </div>
              </div>
@@ -1205,7 +1786,7 @@ const Settings: React.FC<SettingsProps> = ({
                           </div>
                           <div className="space-y-2">
                              <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-2">Joined Date</label>
-                             <input type="date" className="w-full border-2 border-slate-100 rounded-2xl p-4.5 font-black text-sm outline-none focus:bg-slate-50 focus:ring-8 focus:ring-primary/5 transition-all bg-slate-50" value={userFormData.joinedDate?.split('T')[0]} onChange={e => setUserFormData({...userFormData, joinedDate: e.target.value})} />
+                             <input type="date" className="w-full border-2 border-slate-100 rounded-2xl p-4.5 font-black text-sm outline-none focus:bg-slate-50 focus:ring-8 focus:ring-primary/5 transition-all bg-slate-50" value={userFormData.joinedDate?.split('T')[0] || ''} onChange={e => setUserFormData({...userFormData, joinedDate: e.target.value})} />
                           </div>
                           <div className="space-y-2">
                              <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-2">System Tier (Role)</label>

@@ -104,11 +104,20 @@ const CustomerAuth: React.FC<CustomerAuthProps> = ({ onSuccess, onBack }) => {
         }
       }
     } catch (err: any) {
-      console.error("Auth Error:", err);
-      if (err.code === 'auth/email-already-in-use') setError("এই ইমেইলটি ইতিমধ্যে ব্যবহৃত হয়েছে।");
-      else if (err.code === 'auth/wrong-password') setError("ভুল পাসওয়ার্ড। আবার চেষ্টা করুন।");
-      else if (err.code === 'auth/user-not-found') setError("এই ইমেইল দিয়ে কোনো একাউন্ট পাওয়া যায়নি।");
-      else setError("একটি সমস্যা হয়েছে। অনুগ্রহ করে আবার চেষ্টা করুন।");
+      console.warn("Customer Auth Warning:", err?.code || err);
+      if (err.code === 'auth/email-already-in-use') {
+        setError("এই ইমেইলটি ইতিমধ্যে ব্যবহৃত হয়েছে। অনুগ্রহ করে লগইন করুন।");
+      } else if (err.code === 'auth/wrong-password' || err.code === 'auth/user-not-found' || err.code === 'auth/invalid-credential') {
+        setError("ইমেইল অথবা পাসওয়ার্ডটি সঠিক নয়। অনুগ্রহ করে আবার যাচাই করুন।");
+      } else if (err.code === 'auth/invalid-email') {
+        setError("ইমেইল ফরম্যাটটি সঠিক নয়।");
+      } else if (err.code === 'auth/too-many-requests') {
+        setError("অতিরিক্ত চেষ্টা করার জন্য সাময়িকভাবে ব্লক করা হয়েছে। কিছুক্ষণ পর চেষ্টা করুন।");
+      } else if (err.code === 'auth/weak-password') {
+        setError("পাসওয়ার্ডটি অন্তত ৬ অক্ষরের হতে হবে।");
+      } else {
+        setError("একটি সমস্যা হয়েছে। অনুগ্রহ করে সঠিক তথ্য দিয়ে চেষ্টা করুন।");
+      }
     } finally {
       setLoading(false);
     }

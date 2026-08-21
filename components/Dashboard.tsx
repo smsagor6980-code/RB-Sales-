@@ -1,6 +1,6 @@
 
 import React, { useMemo, useState } from 'react';
-import { Sale, Collection, Activity, Product, Expense, Customer, Staff } from '../types';
+import { Sale, Collection, Activity, Product, Expense, Customer, Staff, calculateLowStockAlerts } from '../types';
 import { 
   DollarSign, TrendingUp, AlertCircle, ShoppingBag, 
   Wallet, PieChart, Activity as ActivityIcon, Package, BarChart3,
@@ -33,32 +33,65 @@ const getLocalToday = () => {
 };
 
 const StatCard = ({ title, value, subValue, icon: Icon, color, trend }: any) => {
-  const colorMap: any = {
-    blue: 'from-blue-600 to-indigo-700 shadow-blue-200',
-    green: 'from-emerald-600 to-teal-800 shadow-emerald-200',
-    red: 'from-rose-600 to-red-800 shadow-rose-200',
-    orange: 'from-orange-500 to-amber-700 shadow-orange-200',
-    purple: 'from-purple-600 to-violet-800 shadow-purple-200',
+  const colorMap: Record<string, { gradient: string; border: string; bgLight: string; text: string }> = {
+    blue: {
+      gradient: 'from-blue-600 to-indigo-700',
+      border: 'hover:border-blue-300',
+      bgLight: 'bg-blue-50/70 text-blue-700',
+      text: 'text-blue-700'
+    },
+    green: {
+      gradient: 'from-emerald-500 to-teal-700',
+      border: 'hover:border-emerald-300',
+      bgLight: 'bg-emerald-50/70 text-emerald-700',
+      text: 'text-emerald-700'
+    },
+    red: {
+      gradient: 'from-rose-500 to-red-700',
+      border: 'hover:border-rose-300',
+      bgLight: 'bg-rose-50/70 text-rose-700',
+      text: 'text-rose-700'
+    },
+    orange: {
+      gradient: 'from-amber-500 to-orange-600',
+      border: 'hover:border-amber-300',
+      bgLight: 'bg-amber-50/70 text-amber-700',
+      text: 'text-amber-700'
+    },
+    purple: {
+      gradient: 'from-purple-600 to-indigo-700',
+      border: 'hover:border-purple-300',
+      bgLight: 'bg-purple-50/70 text-purple-700',
+      text: 'text-purple-700'
+    },
+    cyan: {
+      gradient: 'from-cyan-600 to-blue-700',
+      border: 'hover:border-cyan-300',
+      bgLight: 'bg-cyan-50/70 text-cyan-700',
+      text: 'text-cyan-700'
+    }
   };
 
+  const style = colorMap[color] || colorMap.blue;
+
   return (
-    <div className="bg-white p-5 sm:p-7 rounded-[32px] shadow-sm border-2 border-slate-100 hover:shadow-2xl transition-all duration-500 relative overflow-hidden group">
-      <div className={`absolute -right-4 -top-4 w-24 h-24 bg-gradient-to-br ${colorMap[color]} opacity-[0.03] rounded-full group-hover:scale-150 transition-transform duration-700`}></div>
-      <div className="flex justify-between items-start mb-5 sm:mb-6">
-        <div className={`p-3.5 sm:p-4 rounded-[20px] sm:rounded-[22px] bg-gradient-to-br ${colorMap[color] || colorMap.blue} text-white shadow-xl shadow-current/20`}>
-          <Icon size={24} strokeWidth={2.5} />
+    <div className={`bg-white p-5 sm:p-7 rounded-[32px] shadow-sm border-2 border-slate-100 ${style.border} hover:shadow-xl transition-all duration-300 relative overflow-hidden group`}>
+      <div className={`absolute -right-6 -top-6 w-28 h-28 bg-gradient-to-br ${style.gradient} opacity-[0.06] rounded-full group-hover:scale-125 transition-transform duration-500`}></div>
+      <div className="flex justify-between items-start mb-4 sm:mb-5">
+        <div className={`p-3.5 sm:p-4 rounded-[20px] bg-gradient-to-br ${style.gradient} text-white shadow-md shadow-slate-900/10`}>
+          <Icon size={22} strokeWidth={2.5} />
         </div>
         {trend !== undefined && (
-           <div className={`flex items-center gap-1 text-[9px] font-black px-2.5 py-1 rounded-full ${trend > 0 ? 'bg-emerald-50 text-emerald-700' : 'bg-rose-50 text-rose-700'}`}>
+           <div className={`flex items-center gap-1 text-[9px] font-black px-2.5 py-1 rounded-full ${trend > 0 ? 'bg-emerald-100 text-emerald-800' : 'bg-rose-100 text-rose-800'}`}>
               {trend > 0 ? <ArrowUpRight size={12}/> : <ArrowDownRight size={12}/>}
               {Math.abs(trend)}%
            </div>
         )}
       </div>
       <div>
-        <p className="text-[10px] font-black text-slate-500 uppercase tracking-[2px] mb-1">{title}</p>
-        <h3 className="text-2xl sm:text-3xl font-black text-slate-900 tracking-tighter uppercase">{value}</h3>
-        {subValue && <p className="text-[9px] text-slate-400 font-black mt-1 uppercase tracking-widest">{subValue}</p>}
+        <p className="text-[11px] font-black text-slate-600 uppercase tracking-[1.5px] mb-1">{title}</p>
+        <h3 className="text-2xl sm:text-3xl font-black text-slate-950 tracking-tighter uppercase">{value}</h3>
+        {subValue && <p className="text-[10px] text-slate-600 font-extrabold mt-1 uppercase tracking-widest">{subValue}</p>}
       </div>
     </div>
   );
@@ -66,6 +99,11 @@ const StatCard = ({ title, value, subValue, icon: Icon, color, trend }: any) => 
 
 const Dashboard: React.FC<DashboardProps> = ({ sales, collections, activities, products, expenses, customers, setActivePage, isAdmin, currentStaff }) => {
   const [period, setPeriod] = useState<'today' | 'week' | 'month' | 'year' | 'lifetime'>('today');
+
+  const lowStockAlerts = useMemo(() => {
+    if (!isAdmin) return [];
+    return calculateLowStockAlerts(products);
+  }, [products, isAdmin]);
 
   const approvedSales = useMemo(() => {
     return sales.filter(s => s.status === 'approved' || s.status === 'paid' || s.status === 'due');
@@ -96,8 +134,8 @@ const Dashboard: React.FC<DashboardProps> = ({ sales, collections, activities, p
     };
 
     const fSales = userSales.filter(s => isWithin(s.date));
-    const retailSales = fSales.filter(s => s.customerType !== 'wholesale').reduce((sum, s) => sum + s.total, 0);
-    const wholesaleSales = fSales.filter(s => s.customerType === 'wholesale').reduce((sum, s) => sum + s.total, 0);
+    const retailSales = fSales.filter(s => s.customerType !== 'wholesale').reduce((sum, s) => sum + (Number(s.total) || 0), 0);
+    const wholesaleSales = fSales.filter(s => s.customerType === 'wholesale').reduce((sum, s) => sum + (Number(s.total) || 0), 0);
     const totalSales = retailSales + wholesaleSales;
     
     const totalReceived = fSales.reduce((sum, s) => sum + (Number(s.paid) || 0), 0);
@@ -119,7 +157,7 @@ const Dashboard: React.FC<DashboardProps> = ({ sales, collections, activities, p
       if (!customerStats[sale.customerId]) {
         customerStats[sale.customerId] = { name, total: 0, count: 0 };
       }
-      customerStats[sale.customerId].total += sale.total;
+      customerStats[sale.customerId].total += (Number(sale.total) || 0);
       customerStats[sale.customerId].count += 1;
     });
 
@@ -137,8 +175,8 @@ const Dashboard: React.FC<DashboardProps> = ({ sales, collections, activities, p
       const dailySales = userSales.filter(s => normalizeDate(s.date) === dateStr);
       return {
         name: d.toLocaleDateString('en-US', { weekday: 'short' }),
-        retail: dailySales.filter(s => s.customerType !== 'wholesale').reduce((sum, s) => sum + s.total, 0),
-        wholesale: dailySales.filter(s => s.customerType === 'wholesale').reduce((sum, s) => sum + s.total, 0)
+        retail: dailySales.filter(s => s.customerType !== 'wholesale').reduce((sum, s) => sum + (Number(s.total) || 0), 0),
+        wholesale: dailySales.filter(s => s.customerType === 'wholesale').reduce((sum, s) => sum + (Number(s.total) || 0), 0)
       };
     });
   }, [userSales]);
@@ -175,12 +213,40 @@ const Dashboard: React.FC<DashboardProps> = ({ sales, collections, activities, p
         </div>
       </div>
 
+      {isAdmin && lowStockAlerts.length > 0 && (
+        <div className="bg-rose-50 border-2 border-rose-100 rounded-[32px] p-6 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 animate-in fade-in slide-in-from-top-4 duration-500">
+          <div className="flex items-center gap-4">
+            <div className="p-3 bg-rose-500 text-white rounded-2xl animate-pulse shrink-0">
+              <AlertCircle size={24} />
+            </div>
+            <div>
+              <h4 className="font-black text-rose-900 text-sm sm:text-base uppercase tracking-tight">কম স্টক অ্যালার্ট (Low Stock Alert)</h4>
+              <p className="text-xs text-rose-700 font-bold mt-0.5">
+                {lowStockAlerts.length} টি প্রোডাক্টের স্টক নির্ধারিত সীমার নিচে রয়েছে। অনুগ্রহ করে স্টক রিফিল করুন।
+              </p>
+            </div>
+          </div>
+          <button 
+            onClick={() => setActivePage('products')}
+            className="px-6 py-2.5 bg-rose-600 hover:bg-rose-700 active:scale-95 text-white text-[10px] sm:text-xs font-black uppercase tracking-wider rounded-xl transition-all shadow-lg shadow-rose-200"
+          >
+            ইনভেন্টরি দেখুন
+          </button>
+        </div>
+      )}
+
       <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4 sm:gap-6">
         <StatCard title="রিটেইল রেভিনিউ" value={formatCurrency(stats.retailSales)} icon={User} color="blue" />
         <StatCard title="হোলসেল রেভিনিউ" value={formatCurrency(stats.wholesaleSales)} icon={Tag} color="green" />
         <StatCard title="জমা (Received)" value={formatCurrency(stats.totalReceived)} icon={Wallet} color="purple" />
         <StatCard title="মোট বকেয়া" value={formatCurrency(stats.totalDue)} icon={AlertCircle} color="red" />
-        <StatCard title="স্টক ভ্যালু" value={formatCurrency(stats.totalStockValue)} icon={Package} color="orange" />
+        <StatCard 
+          title="স্টক ভ্যালু" 
+          value={formatCurrency(stats.totalStockValue)} 
+          subValue={isAdmin && lowStockAlerts.length > 0 ? `${lowStockAlerts.length} টি প্রোডাক্ট কম স্টক` : undefined}
+          icon={Package} 
+          color={isAdmin && lowStockAlerts.length > 0 ? "red" : "orange"} 
+        />
         <StatCard title="মোট কাস্টমার" value={stats.totalCustomers} icon={Users} color="blue" />
       </div>
 
@@ -210,15 +276,15 @@ const Dashboard: React.FC<DashboardProps> = ({ sales, collections, activities, p
                       <stop offset="95%" stopColor="#10b981" stopOpacity={0}/>
                     </linearGradient>
                   </defs>
-                  <CartesianGrid strokeDasharray="5 5" vertical={false} stroke="#f1f5f9" />
-                  <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{fontSize: 10, fontWeight: '900', fill: '#94a3b8'}} dy={15} />
-                  <YAxis axisLine={false} tickLine={false} tick={{fontSize: 10, fontWeight: '900', fill: '#94a3b8'}} tickFormatter={(v) => v >= 1000 ? (v/1000)+'k' : v} />
+                  <CartesianGrid strokeDasharray="5 5" vertical={false} stroke="#e2e8f0" />
+                  <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{fontSize: 11, fontWeight: '900', fill: '#334155'}} dy={15} />
+                  <YAxis axisLine={false} tickLine={false} tick={{fontSize: 11, fontWeight: '900', fill: '#334155'}} tickFormatter={(v) => v >= 1000 ? (v/1000)+'k' : v} />
                   <Tooltip 
                     cursor={{ stroke: '#1e1e5f', strokeWidth: 2, strokeDasharray: '5 5' }}
-                    contentStyle={{ borderRadius: '24px', border: 'none', boxShadow: '0 25px 50px -12px rgba(0,0,0,0.15)', padding: '15px', fontWeight: '900' }}
+                    contentStyle={{ borderRadius: '24px', border: 'none', boxShadow: '0 25px 50px -12px rgba(0,0,0,0.15)', padding: '15px', fontWeight: '900', color: '#0f172a' }}
                   />
                   <Area type="monotone" dataKey="retail" stroke="#2563eb" strokeWidth={5} fillOpacity={1} fill="url(#colorRetail)" animationDuration={1000} />
-                  <Area type="monotone" dataKey="wholesale" stroke="#10b981" strokeWidth={5} fillOpacity={1} fill="url(#colorWholesale)" animationDuration={1000} />
+                  <Area type="monotone" dataKey="wholesale" stroke="#059669" strokeWidth={5} fillOpacity={1} fill="url(#colorWholesale)" animationDuration={1000} />
                 </AreaChart>
               </ResponsiveContainer>
             </div>
@@ -233,38 +299,38 @@ const Dashboard: React.FC<DashboardProps> = ({ sales, collections, activities, p
             <div className="overflow-x-auto no-scrollbar">
               <table className="w-full">
                 <thead>
-                  <tr className="text-left border-b-2 border-slate-50">
-                    <th className="pb-4 text-[10px] font-black text-slate-400 uppercase tracking-widest">নাম</th>
-                    <th className="pb-4 text-[10px] font-black text-slate-400 uppercase tracking-widest text-center">ইনভয়েস</th>
-                    <th className="pb-4 text-[10px] font-black text-slate-400 uppercase tracking-widest text-right">মোট ক্রয়</th>
+                  <tr className="text-left border-b-2 border-slate-100">
+                    <th className="pb-4 text-[11px] font-black text-slate-600 uppercase tracking-widest">নাম</th>
+                    <th className="pb-4 text-[11px] font-black text-slate-600 uppercase tracking-widest text-center">ইনভয়েস</th>
+                    <th className="pb-4 text-[11px] font-black text-slate-600 uppercase tracking-widest text-right">মোট ক্রয়</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-slate-50">
+                <tbody className="divide-y divide-slate-100">
                   {topCustomers.map((c, i) => (
-                    <tr key={c.id} className="group hover:bg-slate-50/50 transition-colors">
+                    <tr key={c.id} className="group hover:bg-slate-50 transition-colors">
                       <td className="py-4">
                         <div className="flex items-center gap-3">
                           <div className={`w-8 h-8 rounded-xl flex items-center justify-center font-black text-xs ${
-                            i === 0 ? 'bg-amber-100 text-amber-600' : 
-                            i === 1 ? 'bg-slate-200 text-slate-600' :
-                            i === 2 ? 'bg-orange-100 text-orange-600' : 'bg-slate-50 text-slate-400'
+                            i === 0 ? 'bg-amber-100 text-amber-700' : 
+                            i === 1 ? 'bg-slate-200 text-slate-700' :
+                            i === 2 ? 'bg-orange-100 text-orange-700' : 'bg-slate-100 text-slate-700'
                           }`}>
                             {i + 1}
                           </div>
-                          <span className="font-black text-slate-800 text-sm tracking-tight">{c.name}</span>
+                          <span className="font-black text-slate-950 text-sm tracking-tight">{c.name}</span>
                         </div>
                       </td>
                       <td className="py-4 text-center">
-                        <span className="text-[10px] font-black text-slate-500 bg-slate-100 px-2 py-1 rounded-lg">{c.count}</span>
+                        <span className="text-[11px] font-black text-slate-700 bg-slate-100 px-2.5 py-1 rounded-lg">{c.count}</span>
                       </td>
                       <td className="py-4 text-right">
-                        <span className="font-black text-slate-900 text-sm">{formatCurrency(c.total)}</span>
+                        <span className="font-black text-slate-950 text-sm">{formatCurrency(c.total)}</span>
                       </td>
                     </tr>
                   ))}
                   {topCustomers.length === 0 && (
                     <tr>
-                      <td colSpan={3} className="py-10 text-center font-black text-slate-400 uppercase text-xs tracking-widest">কোন ডেটা নেই</td>
+                      <td colSpan={3} className="py-10 text-center font-black text-slate-500 uppercase text-xs tracking-widest">কোন ডেটা নেই</td>
                     </tr>
                   )}
                 </tbody>
@@ -275,7 +341,7 @@ const Dashboard: React.FC<DashboardProps> = ({ sales, collections, activities, p
 
         <div className="lg:col-span-4 bg-white p-6 sm:p-10 rounded-[40px] shadow-sm border-2 border-slate-100 h-fit">
           <h3 className="font-black text-slate-900 mb-8 sm:mb-10 flex items-center gap-3 uppercase tracking-tight"><ActivityIcon size={24} className="text-orange-500"/> সাম্প্রতিক কার্যক্রম</h3>
-          <div className="space-y-6 sm:space-y-8 relative before:absolute before:left-[19px] before:top-2 before:bottom-2 before:w-[2px] before:bg-slate-50">
+          <div className="space-y-6 sm:space-y-8 relative before:absolute before:left-[19px] before:top-2 before:bottom-2 before:w-[2px] before:bg-slate-100">
             {(activities || []).slice(0, 6).map((act, i) => (
               <div key={act.id} className="flex gap-4 sm:gap-6 items-start relative z-10 animate-in fade-in slide-in-from-left duration-500" style={{ animationDelay: `${i * 50}ms` }}>
                 <div className={`w-10 h-10 rounded-[14px] flex items-center justify-center shrink-0 shadow-lg border-2 ${
@@ -286,11 +352,11 @@ const Dashboard: React.FC<DashboardProps> = ({ sales, collections, activities, p
                    act.type === 'return' ? <RotateCcw size={18} /> : <DollarSign size={18} />}
                 </div>
                 <div className="min-w-0 flex-1">
-                    <h4 className="text-[11px] font-black text-slate-900 uppercase tracking-tight truncate">{act.title}</h4>
-                    <p className="text-[10px] text-slate-500 font-bold mt-0.5 truncate uppercase">{act.description}</p>
+                    <h4 className="text-[12px] font-black text-slate-950 uppercase tracking-tight truncate">{act.title}</h4>
+                    <p className="text-[11px] text-slate-600 font-bold mt-0.5 truncate uppercase">{act.description}</p>
                     <div className="flex items-center gap-2 mt-1.5">
-                       <span className="text-[9px] font-black text-slate-400 uppercase tracking-wider">{normalizeDate(act.date)}</span>
-                       <span className="text-[9px] font-black text-primary bg-primary/5 px-2 py-0.5 rounded uppercase">৳{act.amount}</span>
+                       <span className="text-[10px] font-black text-slate-600 uppercase tracking-wider">{normalizeDate(act.date)}</span>
+                       <span className="text-[10px] font-black text-primary bg-primary/10 px-2 py-0.5 rounded uppercase">৳{act.amount}</span>
                     </div>
                 </div>
               </div>
