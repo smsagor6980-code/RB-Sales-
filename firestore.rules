@@ -221,6 +221,18 @@ service cloud.firestore {
       allow write: if isAdmin();
     }
 
+    match /customer_loans/{loanId} {
+      allow read, write: if isApprovedStaff();
+    }
+
+    match /production_batches/{batchId} {
+      allow read, write: if isApprovedStaff();
+    }
+
+    match /supplier_returns/{returnId} {
+      allow read, write: if isApprovedStaff();
+    }
+
     match /stock_entries/{entryId} {
       allow get: if isApprovedStaff() && isValidId(entryId);
       allow list: if isApprovedStaff();

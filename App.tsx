@@ -31,7 +31,7 @@ interface FirestoreErrorInfo {
   }
 }
 
-import { Product, Customer, Sale, Collection, Activity, Expense, ProductCategory, Staff, Supplier, RankConfig, AppRole, ProductReturn, Purchase, Attendance, LeaveRequest, Payroll, AdvanceLoan, ExpenseReimbursement, WishlistItem, AppNotification, CartItem, ShopSettings, SupplierPayment, StockEntry } from './types';
+import { Product, Customer, Sale, Collection, Activity, Expense, ProductCategory, Staff, Supplier, RankConfig, AppRole, ProductReturn, Purchase, Attendance, LeaveRequest, Payroll, AdvanceLoan, CustomerLoan, CustomerLoanRepayment, ExpenseReimbursement, WishlistItem, AppNotification, CartItem, ShopSettings, SupplierPayment, SupplierReturn, StockEntry, ProductionBatch } from './types';
 import Layout from './components/Layout';
 import Auth from './components/Auth';
 import Dashboard from './components/Dashboard';
@@ -49,7 +49,7 @@ import Employees from './components/Employees';
 import PayrollModule from './components/Payroll';
 
 import { EcommerceLayout, ShopHome, CustomerAuth, CartDrawer, CheckoutModal, CustomerProfile, ProductDetailModal, OrderDetailModal } from './components/ecommerce';
-import { motion, AnimatePresence } from 'motion/react';
+import { motion, AnimatePresence } from 'framer-motion';
 import { RefreshCw, Loader2, Clock, AlertTriangle, ShoppingBag, ShieldCheck, ArrowRight } from 'lucide-react';
 
 const DEFAULT_RANKS: RankConfig[] = [
@@ -132,6 +132,7 @@ const App: React.FC = () => {
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [activities, setActivities] = useState<Activity[]>([]);
   const [returns, setReturns] = useState<ProductReturn[]>([]);
+  const [supplierReturns, setSupplierReturns] = useState<SupplierReturn[]>([]);
   
   // E-commerce State
   const [cart, setCart] = useState<CartItem[]>([]);
@@ -142,6 +143,7 @@ const App: React.FC = () => {
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
   const [selectedOrder, setSelectedOrder] = useState<Sale | null>(null);
   const [stockEntries, setStockEntries] = useState<StockEntry[]>([]);
+  const [productionBatches, setProductionBatches] = useState<ProductionBatch[]>([]);
   const [shopPage, setShopPage] = useState<'home' | 'categories' | 'search'>('home');
   const [shopSearchQuery, setShopSearchQuery] = useState('');
   
@@ -150,6 +152,7 @@ const App: React.FC = () => {
   const [leaves, setLeaves] = useState<LeaveRequest[]>([]);
   const [payrolls, setPayrolls] = useState<Payroll[]>([]);
   const [loans, setLoans] = useState<AdvanceLoan[]>([]);
+  const [customerLoans, setCustomerLoans] = useState<CustomerLoan[]>([]);
   const [reimbursements, setReimbursements] = useState<ExpenseReimbursement[]>([]);
   
   const [activePage, setActivePage] = useState('dashboard');
@@ -175,6 +178,9 @@ const App: React.FC = () => {
   };
 
   const handleFirestoreError = useCallback((error: any, operationType: OperationType, path: string | null) => {
+    const isUnavailable = error?.code === 'unavailable' || error?.message?.includes('unavailable') || error?.message?.includes('Could not reach Cloud Firestore backend');
+    const isPermissionDenied = error?.message?.includes('permission-denied') || error?.code === 'permission-denied';
+    
     const errInfo: FirestoreErrorInfo = {
       error: error instanceof Error ? error.message : String(error),
       authInfo: {
@@ -193,8 +199,14 @@ const App: React.FC = () => {
       operationType,
       path
     };
+
+    if (isUnavailable) {
+      console.warn('Firestore offline/reconnecting: operating in cached offline mode.', { path, operationType });
+      return;
+    }
+
     console.error('Firestore Error: ', JSON.stringify(errInfo));
-    if (error?.message?.includes('permission-denied') || error?.code === 'permission-denied') {
+    if (isPermissionDenied) {
       setPermissionError(`অ্যাক্সেস অনুমোদিত নয়: ${path}`);
       throw new Error(JSON.stringify(errInfo));
     }
@@ -293,7 +305,24 @@ const App: React.FC = () => {
       if (isOwner) {
         setIsAdminSession(true);
         setPermissionError(null);
-        if (currentStaffData) setActiveStaff(currentStaffData);
+        if (currentStaffData) {
+          setActiveStaff(currentStaffData);
+        } else {
+          setActiveStaff(prev => {
+            if (prev && prev.email === user.email && prev.id === user.uid) return prev;
+            return {
+              id: user.uid,
+              uid: user.uid,
+              name: 'Owner',
+              email: user.email,
+              phone: '',
+              designation: 'Owner',
+              status: 'active',
+              isApproved: true,
+              joinedDate: new Date().toISOString()
+            };
+          });
+        }
       } else if (currentStaffData) {
         setActiveStaff(currentStaffData);
         const isPrivileged = ['Admin', 'Owner', 'Manager'].includes(currentStaffData.designation);
@@ -321,16 +350,24 @@ const App: React.FC = () => {
   useEffect(() => {
     const timer = setTimeout(() => {
       setLoadingTimeout(true);
+    }, 3000);
+
+    const safetyTimer = setTimeout(() => {
+      console.warn("Bypassing splash screen automatically due to initialization delay");
+      setLoading(false);
     }, 5000);
     
     if (!auth) { 
       console.error("Firebase Auth not initialized!");
       setLoading(false); 
+      clearTimeout(timer);
+      clearTimeout(safetyTimer);
       return; 
     }
     
     const unsubscribeAuth = auth.onAuthStateChanged(async (currentUser) => {
       clearTimeout(timer);
+      clearTimeout(safetyTimer);
       listenersRef.current.forEach(u => u());
       listenersRef.current = [];
       setPermissionError(null);
@@ -378,47 +415,7 @@ const App: React.FC = () => {
             });
             listenersRef.current.push(staffUnsubscribe);
 
-            // 3. Gracefully check permissions for privileged data
-            let isPrivileged = isOwner;
-            if (!isPrivileged) {
-              try {
-                // Try direct UID lookup first
-                const staffSnap = await getDoc(doc(db, 'staff', currentUser.uid));
-                if (staffSnap.exists()) {
-                  const staffData = staffSnap.data() as Staff;
-                  if (staffData.isApproved) {
-                    isPrivileged = true;
-                    setActiveStaff(staffData);
-                  }
-                } else if (currentUser.email) {
-                  // Fallback: search by email
-                  const q = query(collection(db, 'staff'), where('email', '==', currentUser.email.toLowerCase()));
-                  const querySnap = await getDocs(q);
-                  if (!querySnap.empty) {
-                    const staffDoc = querySnap.docs[0];
-                    const staffData = staffDoc.data() as Staff;
-                    if (staffData.isApproved) {
-                      isPrivileged = true;
-                      // Ensure activeStaff ID is the UID for rule consistency
-                      const staffWithUid = { ...staffData, id: currentUser.uid, uid: currentUser.uid };
-                      setActiveStaff(staffWithUid);
-                      // Optimization: Update the document to use the UID as ID if it's different
-                      if (staffDoc.id !== currentUser.uid) {
-                        try {
-                          await setDoc(doc(db, 'staff', currentUser.uid), staffWithUid);
-                        } catch (sdErr) {
-                          console.warn("Could not link UID to staff doc.");
-                        }
-                      }
-                    }
-                  }
-                }
-              } catch (e) {
-                console.log("Not an approved staff member or access restricted.");
-              }
-            }
-            
-            if (isPrivileged) {
+            if (isOwner) {
               setViewMode('admin');
               const adminCollections = [
                 { path: 'roles', setter: setRoles },
@@ -435,8 +432,10 @@ const App: React.FC = () => {
                 { path: 'leaves', setter: setLeaves },
                 { path: 'payrolls', setter: setPayrolls },
                 { path: 'loans', setter: setLoans },
+                { path: 'customer_loans', setter: setCustomerLoans },
                 { path: 'reimbursements', setter: setReimbursements },
                 { path: 'stock_entries', setter: setStockEntries },
+                { path: 'production_batches', setter: setProductionBatches },
               ];
 
               adminCollections.forEach(({ path, setter }) => {
@@ -447,8 +446,9 @@ const App: React.FC = () => {
                 });
                 listenersRef.current.push(unsubscribe);
               });
+              setLoading(false);
             } else {
-              // Limited view for customers
+              // Limited view for customers (standard non-blocking path)
               setViewMode('shop');
               const customerUnsubscribe = onSnapshot(doc(db, 'customers', currentUser.uid), (snap) => {
                 const data = snap.data() as Customer;
@@ -468,6 +468,140 @@ const App: React.FC = () => {
                 console.warn("Customer sales restricted.");
               });
               listenersRef.current.push(salesUnsubscribe);
+
+              // Real-time listener for the current user's specific staff record
+              let adminSubscribed = false;
+              const staffSelfUnsubscribe = onSnapshot(doc(db, 'staff', currentUser.uid), async (snap) => {
+                try {
+                  if (snap.exists()) {
+                    const foundStaff = snap.data() as Staff;
+                    
+                    // Set the staff state so the consolidation and components work correctly
+                    setStaff(prev => {
+                      if (prev.some(s => s.id === foundStaff.id)) {
+                        return prev.map(s => s.id === foundStaff.id ? foundStaff : s);
+                      }
+                      return [...prev, foundStaff];
+                    });
+
+                    if (foundStaff.isApproved) {
+                      setActiveStaff(foundStaff);
+                      const isPrivileged = ['Admin', 'Owner', 'Manager'].includes(foundStaff.designation);
+                      setIsAdminSession(isPrivileged);
+                      setViewMode('admin');
+                      setPermissionError(null);
+
+                      // Subscribe to administrative collections if not already done
+                      if (!adminSubscribed) {
+                        adminSubscribed = true;
+                        const adminCollections = [
+                          { path: 'roles', setter: setRoles },
+                          { path: 'customers', setter: setCustomers },
+                          { path: 'suppliers', setter: setSupplierList },
+                          { path: 'supplier_payments', setter: setSupplierPayments },
+                          { path: 'sales', setter: (v: any) => setSales(ensureArray(v).sort((a: any, b: any) => (b.id || '').localeCompare(a.id || ''))) },
+                          { path: 'purchases', setter: (v: any) => setPurchases(ensureArray(v).sort((a: any, b: any) => (b.id || '').localeCompare(a.id || ''))) },
+                          { path: 'collections', setter: setCollections },
+                          { path: 'expenses', setter: setExpenses },
+                          { path: 'activities', setter: (v: any) => setActivities(ensureArray(v).slice(0, 100)) },
+                          { path: 'returns', setter: setReturns },
+                          { path: 'attendances', setter: setAttendances },
+                          { path: 'leaves', setter: setLeaves },
+                          { path: 'payrolls', setter: setPayrolls },
+                          { path: 'loans', setter: setLoans },
+                          { path: 'customer_loans', setter: setCustomerLoans },
+                          { path: 'reimbursements', setter: setReimbursements },
+                          { path: 'stock_entries', setter: setStockEntries },
+                          { path: 'supplier_returns', setter: setSupplierReturns },
+                        ];
+
+                        adminCollections.forEach(({ path, setter }) => {
+                          const unsubscribe = onSnapshot(collection(db, path), (snapshot) => {
+                            setter(ensureArray(snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id }))));
+                          }, (err) => {
+                            console.warn(`Admin data error for ${path}:`, err.message);
+                          });
+                          listenersRef.current.push(unsubscribe);
+                        });
+                      }
+                    } else {
+                      // Check if there's another document under a different ID (e.g. STAFF-xxxx) that is approved
+                      let mergedApproved = false;
+                      if (currentUser.email) {
+                        try {
+                          const emailLower = currentUser.email.toLowerCase();
+                          const q = query(collection(db, 'staff'), where('email', '==', emailLower));
+                          const querySnap = await getDocs(q);
+                          const approvedDoc = querySnap.docs.find(d => d.id !== currentUser.uid && d.data().isApproved);
+                          if (approvedDoc) {
+                            const approvedData = approvedDoc.data() as Staff;
+                            const linkedStaff = {
+                              ...approvedData,
+                              id: currentUser.uid,
+                              uid: currentUser.uid,
+                              isApproved: true,
+                              status: approvedData.status
+                            };
+                            await setDoc(doc(db, 'staff', currentUser.uid), linkedStaff);
+                            try {
+                              await deleteDoc(doc(db, 'staff', approvedDoc.id));
+                            } catch (delErr) {
+                              console.warn("Could not delete old approved doc:", delErr);
+                            }
+                            mergedApproved = true;
+                          }
+                        } catch (err) {
+                          console.warn("Error looking up alternative approved staff record:", err);
+                        }
+                      }
+                      
+                      if (!mergedApproved) {
+                        setPermissionError("আপনার একাউন্টটি এখনো অনুমোদিত হয়নি। এডমিনের অনুমোদনের জন্য অপেক্ষা করুন।");
+                      }
+                    }
+                  } else {
+                    // Fallback: If not found by UID directly, search by email to find any pre-configured record
+                    if (currentUser.email) {
+                      try {
+                        const emailLower = currentUser.email.toLowerCase();
+                        const q = query(collection(db, 'staff'), where('email', '==', emailLower));
+                        const querySnap = await getDocs(q);
+                        if (!querySnap.empty) {
+                          const matchedDoc = querySnap.docs.find(d => d.data().isApproved) || querySnap.docs[0];
+                          if (matchedDoc.id !== currentUser.uid) {
+                            const staffData = matchedDoc.data() as Staff;
+                            const linkedStaff = { 
+                              ...staffData, 
+                              id: currentUser.uid, 
+                              uid: currentUser.uid,
+                              isApproved: staffData.isApproved,
+                              status: staffData.status
+                            };
+                            // Link user to the correct pre-created staff doc path
+                            await setDoc(doc(db, 'staff', currentUser.uid), linkedStaff);
+                            
+                            // Clean up the duplicate pre-created STAFF-... document
+                            try {
+                              await deleteDoc(doc(db, 'staff', matchedDoc.id));
+                            } catch (delErr) {
+                              console.warn("Could not delete old staff document:", delErr);
+                            }
+                          }
+                        }
+                      } catch (qErr) {
+                        console.warn("Searching staff by email failed:", qErr);
+                      }
+                    }
+                  }
+                } catch (snapErr) {
+                  console.warn("Error processing staff listener update:", snapErr);
+                }
+              }, (err) => {
+                console.warn("Self-staff profile snapshot failed:", err);
+              });
+              listenersRef.current.push(staffSelfUnsubscribe);
+
+              setLoading(false);
             }
           } else {
             setUser(null);
@@ -475,10 +609,10 @@ const App: React.FC = () => {
             setActiveCustomer(null);
             setIsAdminSession(false);
             setViewMode('shop');
+            setLoading(false);
           }
         } catch (err) {
           console.error("Critical Data Context Failure:", err);
-        } finally {
           setLoading(false);
         }
       } else {
@@ -545,6 +679,7 @@ const App: React.FC = () => {
         items.forEach(item => {
           const idx = next.findIndex(c => c.id === item.id);
           if (idx >= 0) next[idx] = { ...next[idx], ...item };
+          else next.push({ ...item });
         });
         return next;
       });
@@ -553,6 +688,116 @@ const App: React.FC = () => {
       if (updatedActive) {
         setActiveCustomer(prev => prev ? { ...prev, ...updatedActive } : null);
       }
+    } else if (type === 'staff') {
+      const items = Array.isArray(data) ? data : [data];
+      setStaff(prev => {
+        const next = [...prev];
+        items.forEach(item => {
+          const idx = next.findIndex(s => s.id === item.id);
+          if (idx >= 0) next[idx] = { ...next[idx], ...item };
+          else next.push({ ...item });
+        });
+        return next;
+      });
+    } else if (type === 'sales') {
+      const items = Array.isArray(data) ? data : [data];
+      setSales(prev => {
+        const next = [...prev];
+        items.forEach(item => {
+          const idx = next.findIndex(s => s.id === item.id);
+          if (idx >= 0) next[idx] = { ...next[idx], ...item };
+          else next.unshift({ ...item });
+        });
+        return next;
+      });
+    } else if (type === 'purchases') {
+      const items = Array.isArray(data) ? data : [data];
+      setPurchases(prev => {
+        const next = [...prev];
+        items.forEach(item => {
+          const idx = next.findIndex(p => p.id === item.id);
+          if (idx >= 0) next[idx] = { ...next[idx], ...item };
+          else next.unshift({ ...item });
+        });
+        return next;
+      });
+    } else if (type === 'suppliers') {
+      const items = Array.isArray(data) ? data : [data];
+      setSupplierList(prev => {
+        const next = [...prev];
+        items.forEach(item => {
+          const idx = next.findIndex(s => s.id === item.id);
+          if (idx >= 0) next[idx] = { ...next[idx], ...item };
+          else next.push({ ...item });
+        });
+        return next;
+      });
+    } else if (type === 'payrolls') {
+      const items = Array.isArray(data) ? data : [data];
+      setPayrolls(prev => {
+        const next = [...prev];
+        items.forEach(item => {
+          const idx = next.findIndex(p => p.id === item.id);
+          if (idx >= 0) next[idx] = { ...next[idx], ...item };
+          else next.push({ ...item });
+        });
+        return next;
+      });
+    } else if (type === 'loans') {
+      const items = Array.isArray(data) ? data : [data];
+      setLoans(prev => {
+        const next = [...prev];
+        items.forEach(item => {
+          const idx = next.findIndex(l => l.id === item.id);
+          if (idx >= 0) next[idx] = { ...next[idx], ...item };
+          else next.push({ ...item });
+        });
+        return next;
+      });
+    } else if (type === 'customer_loans') {
+      const items = Array.isArray(data) ? data : [data];
+      setCustomerLoans(prev => {
+        const next = [...prev];
+        items.forEach(item => {
+          const idx = next.findIndex(l => l.id === item.id);
+          if (idx >= 0) next[idx] = { ...next[idx], ...item };
+          else next.unshift({ ...item });
+        });
+        return next;
+      });
+    } else if (type === 'reimbursements') {
+      const items = Array.isArray(data) ? data : [data];
+      setReimbursements(prev => {
+        const next = [...prev];
+        items.forEach(item => {
+          const idx = next.findIndex(r => r.id === item.id);
+          if (idx >= 0) next[idx] = { ...next[idx], ...item };
+          else next.push({ ...item });
+        });
+        return next;
+      });
+    } else if (type === 'roles') {
+      const items = Array.isArray(data) ? data : [data];
+      setRoles(prev => {
+        const next = [...prev];
+        items.forEach(item => {
+          const idx = next.findIndex(r => r.id === item.id);
+          if (idx >= 0) next[idx] = { ...next[idx], ...item };
+          else next.push({ ...item });
+        });
+        return next;
+      });
+    } else if (type === 'ranks') {
+      const items = Array.isArray(data) ? data : [data];
+      setRankConfigs(prev => {
+        const next = [...prev];
+        items.forEach(item => {
+          const idx = next.findIndex(r => r.id === item.id);
+          if (idx >= 0) next[idx] = { ...next[idx], ...item };
+          else next.push({ ...item });
+        });
+        return next;
+      });
     }
 
     try {
@@ -569,7 +814,64 @@ const App: React.FC = () => {
   };
 
   const handleDelete = (type: string, id: string) => {
+    if (type === 'staff') {
+      setStaff(prev => prev.filter(s => s.id !== id));
+    } else if (type === 'products') {
+      setProducts(prev => prev.filter(p => p.id !== id));
+    } else if (type === 'customers') {
+      setCustomers(prev => prev.filter(c => c.id !== id));
+    } else if (type === 'suppliers') {
+      setSupplierList(prev => prev.filter(s => s.id !== id));
+    } else if (type === 'categories') {
+      setCategories(prev => prev.filter(c => c.id !== id));
+    } else if (type === 'sales') {
+      setSales(prev => prev.filter(s => s.id !== id));
+    } else if (type === 'expenses') {
+      setExpenses(prev => prev.filter(e => e.id !== id));
+    } else if (type === 'payrolls') {
+      setPayrolls(prev => prev.filter(p => p.id !== id));
+    } else if (type === 'loans') {
+      setLoans(prev => prev.filter(l => l.id !== id));
+    } else if (type === 'customer_loans') {
+      setCustomerLoans(prev => prev.filter(l => l.id !== id));
+    } else if (type === 'reimbursements') {
+      setReimbursements(prev => prev.filter(r => r.id !== id));
+    } else if (type === 'activities') {
+      setActivities(prev => prev.filter(a => a.id !== id));
+    } else if (type === 'production_batches') {
+      setProductionBatches(prev => prev.filter(b => b.id !== id));
+    }
     deleteFirebase(type, id);
+  };
+
+  const handleProductionBatchComplete = (newBatch: ProductionBatch, updatedProducts: Product[], newEntries: StockEntry[]) => {
+    const newActivity: Activity = {
+      id: Date.now().toString(),
+      type: 'stock_update',
+      title: `উৎপাদন ব্যাচ: #${newBatch.batchNo}`,
+      description: `${newBatch.producedQuantity} ${newBatch.unit} ${newBatch.producedProductName} তৈরি করা হয়েছে। কাঁচামাল স্টক সমন্বয় হয়েছে।`,
+      amount: newBatch.totalProducedValue,
+      date: newBatch.date,
+      addedBy: activeStaff?.id
+    };
+
+    setProductionBatches(prev => [newBatch, ...prev]);
+    setProducts(updatedProducts);
+    setStockEntries(prev => [...newEntries, ...prev]);
+    setActivities(prev => [newActivity, ...prev].slice(0, 100));
+
+    updateFirebase('production_batches', newBatch);
+    updateFirebase('activities', newActivity);
+    newEntries.forEach(entry => updateFirebase('stock_entries', entry));
+    
+    // Sync changed products
+    const changedProducts = updatedProducts.filter(p => {
+      const original = products.find(o => o.id === p.id);
+      return original && original.stock !== p.stock;
+    });
+    if (changedProducts.length > 0) {
+      updateFirebase('products', changedProducts);
+    }
   };
 
   const handleSaleComplete = (newSale: Sale, updatedProducts: Product[], updatedCustomers: Customer[]) => {
@@ -616,6 +918,56 @@ const App: React.FC = () => {
       if (changedProducts.length > 0) updateFirebase('products', changedProducts);
       if (changedCustomer) updateFirebase('customers', changedCustomer);
     }
+  };
+
+  const handleProcessSplitDelivery = (
+    deliveredSale: Sale,
+    newUndeliveredSale: Sale | null,
+    updatedProducts: Product[],
+    updatedCustomers: Customer[]
+  ) => {
+    // 1. Update sales state and Firebase
+    setSales(prev => {
+      let next = prev.map(s => s.id === deliveredSale.id ? deliveredSale : s);
+      if (newUndeliveredSale && !next.some(s => s.id === newUndeliveredSale.id)) {
+        next = [newUndeliveredSale, ...next];
+      }
+      return next;
+    });
+    updateFirebase('sales', deliveredSale);
+    if (newUndeliveredSale) {
+      updateFirebase('sales', newUndeliveredSale);
+    }
+
+    // 2. Update products state and Firebase
+    setProducts(updatedProducts);
+    const affectedProductIds = new Set(deliveredSale.items.map(i => i.productId));
+    const changedProducts = updatedProducts.filter(p => affectedProductIds.has(p.id));
+    if (changedProducts.length > 0) {
+      updateFirebase('products', changedProducts);
+    }
+
+    // 3. Update customers state and Firebase
+    setCustomers(updatedCustomers);
+    const changedCustomer = updatedCustomers.find(c => c.id === deliveredSale.customerId);
+    if (changedCustomer) {
+      updateFirebase('customers', changedCustomer);
+    }
+
+    // 4. Log Activity
+    const newActivity: Activity = {
+      id: Date.now().toString(),
+      type: 'delivery',
+      title: `ডেলিভারি ও চালান: #${deliveredSale.invoiceNo}`,
+      description: newUndeliveredSale 
+        ? `ইনভয়েস #${deliveredSale.invoiceNo} আংশিক ডেলিভারি দেওয়া হয়েছে এবং অবশিষ্ট পণ্যের জন্য নতুন অনডেলিভারী চালান #${newUndeliveredSale.invoiceNo} তৈরি করা হয়েছে।`
+        : `ইনভয়েস #${deliveredSale.invoiceNo} পণ্য ডেলিভারি সম্পন্ন হয়েছে।`,
+      amount: deliveredSale.total,
+      date: new Date().toISOString(),
+      addedBy: activeStaff?.id
+    };
+    setActivities(prev => [newActivity, ...prev].slice(0, 100));
+    updateFirebase('activities', newActivity);
   };
 
   const handlePurchaseComplete = (newPurchase: Purchase, updatedSuppliers: Supplier[], updatedProducts: Product[]) => {
@@ -682,6 +1034,33 @@ const App: React.FC = () => {
       title: `${ret.type === 'damage' ? 'ড্যামেজ' : 'রিটার্ন'}: ${ret.productName}`,
       description: `${ret.quantity}টি পণ্য ফেরত এসেছে।`,
       amount: ret.amount,
+      date: ret.date,
+      addedBy: activeStaff?.id
+    };
+    setActivities(prev => [newActivity, ...prev].slice(0, 100));
+    updateFirebase('activities', newActivity);
+  };
+
+  const handleSupplierReturn = (ret: SupplierReturn, updatedSuppliers: Supplier[], updatedProducts: Product[]) => {
+    const returnWithAuthor = { ...ret, addedBy: activeStaff?.id };
+    setSupplierReturns(prev => [returnWithAuthor, ...prev]);
+    setSupplierList(updatedSuppliers);
+    setProducts(updatedProducts);
+
+    updateFirebase('supplier_returns', returnWithAuthor);
+
+    const changedSupplier = updatedSuppliers.find(s => s.id === ret.supplierId);
+    if (changedSupplier) updateFirebase('suppliers', changedSupplier);
+
+    const changedProduct = updatedProducts.find(p => p.id === ret.productId);
+    if (changedProduct) updateFirebase('products', changedProduct);
+
+    const newActivity: Activity = {
+      id: generateId('ACT-'),
+      type: 'return',
+      title: `সাপ্লায়ার পণ্য ফেরত: ${ret.productName}`,
+      description: `${ret.quantity}টি পণ্য সাপ্লায়ারের নিকট ফেরত দেওয়া হয়েছে। পরিমাণ: ৳${ret.totalAmount}`,
+      amount: ret.totalAmount,
       date: ret.date,
       addedBy: activeStaff?.id
     };
@@ -787,10 +1166,10 @@ const App: React.FC = () => {
     setIsCartOpen(true);
   };
 
-  const handleUpdateCartQuantity = (productId: string, delta: number) => {
+  const handleUpdateCartQuantity = (productId: string, delta: number, absoluteQty?: number) => {
     setCart(prev => prev.map(item => {
       if (item.productId === productId) {
-        const newQty = Math.max(0, item.quantity + delta);
+        const newQty = absoluteQty !== undefined ? Math.max(0, absoluteQty) : Math.max(0, item.quantity + delta);
         return { ...item, quantity: newQty, total: newQty * item.unitPrice };
       }
       return item;
@@ -1055,6 +1434,7 @@ const App: React.FC = () => {
                   order={selectedOrder}
                   products={products}
                   onClose={() => setSelectedOrder(null)}
+                  shopSettings={shopSettings}
                 />
               )}
             </AnimatePresence>
@@ -1106,37 +1486,62 @@ const App: React.FC = () => {
       setActivePage={setActivePage} 
       isOnline={isOnline} 
       onLogout={() => auth?.signOut()} 
-      userEmail={user.email} 
+      userEmail={user?.email || ''} 
       isAdmin={isAdminSession}
       userRoleName={activeStaff?.designation || 'Salesman'}
       roles={roles}
       onSwitchToShop={() => setViewMode('shop')}
+      products={products}
+      shopSettings={shopSettings}
+      onUpdateShopSettings={handleUpdateShopSettings}
     >
       <div className="relative">
         {!isOnline && <div className="fixed top-20 left-1/2 -translate-x-1/2 z-[100] bg-rose-500 text-white px-6 py-2 rounded-full text-[10px] font-black uppercase tracking-widest border border-rose-400 shadow-xl">অফলাইন মোড</div>}
         {isSyncing && <div className="fixed top-20 right-8 z-[100] bg-white shadow-2xl rounded-full p-3 animate-spin border-2 border-primary/20"><RefreshCw size={20} className="text-primary" /></div>}
         
         {activePage === 'dashboard' && <Dashboard sales={sales} collections={collections} activities={activities} products={products} expenses={expenses} customers={customers} setActivePage={setActivePage} isAdmin={isAdminSession} currentStaff={activeStaff} />}
-        {activePage === 'sales' && <Sales products={products} customers={customers} sales={sales} onSaleComplete={handleSaleComplete} onAddReturn={handleReturn} staff={activeStaff ? [activeStaff] : []} isAdmin={isAdminSession} currentStaff={activeStaff} shopSettings={shopSettings} />}
-        {activePage === 'approvals' && <OrderApprovals sales={sales} products={products} customers={customers} onUpdateSales={(data) => handleUpdate('sales', data)} onUpdateProducts={(data) => handleUpdate('products', data)} onUpdateCustomers={(data) => handleUpdate('customers', data)} isAdmin={isAdminSession} />}
-        {activePage === 'products' && <Products products={products} purchases={purchases} onUpdate={(data) => handleUpdate('products', data)} onDelete={(id) => handleDelete('products', id)} categories={categories} onCategoryUpdate={(data) => handleUpdate('categories', data)} stockEntries={stockEntries} onStockUpdate={(entry, updatedProducts) => {
-          setStockEntries(prev => [entry, ...prev]);
-          setProducts(updatedProducts);
-          updateFirebase('stock_entries', entry);
-          updateFirebase('products', updatedProducts);
-        }} currentStaff={activeStaff} />}
+        {activePage === 'sales' && <Sales products={products} customers={customers} sales={sales} onSaleComplete={handleSaleComplete} onAddReturn={handleReturn} onSplitDelivery={handleProcessSplitDelivery} staff={activeStaff ? [activeStaff] : []} isAdmin={isAdminSession} currentStaff={activeStaff} shopSettings={shopSettings} />}
+        {activePage === 'approvals' && <OrderApprovals sales={sales} products={products} customers={customers} onUpdateSales={(data) => handleUpdate('sales', data)} onDeleteSale={(id) => handleDelete('sales', id)} onUpdateProducts={(data) => handleUpdate('products', data)} onUpdateCustomers={(data) => handleUpdate('customers', data)} onSplitDelivery={handleProcessSplitDelivery} isAdmin={isAdminSession} currentStaff={activeStaff} shopSettings={shopSettings} />}
+        {activePage === 'products' && <Products 
+          products={products} 
+          purchases={purchases} 
+          suppliers={suppliers}
+          productionBatches={productionBatches}
+          onProductionBatchComplete={handleProductionBatchComplete}
+          onDeleteProductionBatch={(id) => handleDelete('production_batches', id)}
+          onUpdate={(data) => handleUpdate('products', data)} 
+          onDelete={(id) => handleDelete('products', id)} 
+          categories={categories} 
+          onCategoryUpdate={(data) => handleUpdate('categories', data)} 
+          stockEntries={stockEntries} 
+          onStockUpdate={(entry, updatedProducts) => {
+            setStockEntries(prev => [entry, ...prev]);
+            setProducts(updatedProducts);
+            updateFirebase('stock_entries', entry);
+            // Only sync the single product that changed in Firebase to avoid syncing other unchanged products
+            const changedProduct = updatedProducts.find(p => {
+              const original = products.find(o => o.id === p.id);
+              return original && original.stock !== p.stock;
+            });
+            if (changedProduct) {
+              updateFirebase('products', changedProduct);
+            }
+          }} 
+          currentStaff={activeStaff} 
+        />}
         {activePage === 'customers' && <Customers customers={customers} onUpdate={(data) => handleUpdate('customers', data)} onDelete={(id) => handleDelete('customers', id)} sales={sales} collections={collections} shopSettings={shopSettings} onCollection={(col, cust) => {
           const colWithAuthor = { ...col, addedBy: activeStaff?.id };
           setCollections(prev => [colWithAuthor, ...prev]); 
           setCustomers(prev => prev.map(c => c.id === cust.id ? cust : c));
           updateFirebase('collections', colWithAuthor); 
           updateFirebase('customers', cust);
-        }} rankConfigs={rankConfigs} isAdmin={isAdminSession} currentStaff={activeStaff} />}
+        }} rankConfigs={rankConfigs} customerLoans={customerLoans} onUpdateCustomerLoans={(data) => handleUpdate('customer_loans', data)} onDeleteCustomerLoan={(id) => handleDelete('customer_loans', id)} isAdmin={isAdminSession} currentStaff={activeStaff} />}
         {activePage === 'suppliers' && <Suppliers 
           suppliers={suppliers} 
           products={products} 
           purchases={purchases} 
           payments={supplierPayments} 
+          returns={supplierReturns}
           onUpdate={(data) => handleUpdate('suppliers', data)} 
           onDelete={(id) => handleDelete('suppliers', id)}
           onPurchaseComplete={handlePurchaseComplete} 
@@ -1148,26 +1553,87 @@ const App: React.FC = () => {
             const changedSupplier = updatedSuppliers.find(s => s.id === pay.supplierId);
             if (changedSupplier) updateFirebase('suppliers', changedSupplier);
           }} 
+          onSupplierReturn={handleSupplierReturn}
           categories={categories} 
           isAdmin={isAdminSession}
+          currentStaff={activeStaff}
           shopSettings={shopSettings}
         />}
         {activePage === 'returns' && <Returns returns={returns} sales={sales} products={products} onAddReturn={handleReturn} />}
-        {activePage === 'employees' && <Employees staff={staff} onUpdateStaff={(data) => handleUpdate('staff', data)} attendances={attendances} onUpdateAttendances={(data) => handleUpdate('attendances', data)} leaves={leaves} onUpdateLeaves={(data) => handleUpdate('leaves', data)} sales={sales} currentStaff={activeStaff} isAdmin={isAdminSession} />}
-        {activePage === 'payroll' && <PayrollModule staff={staff} payrolls={payrolls} onUpdatePayrolls={(data) => handleUpdate('payrolls', data)} loans={loans} onUpdateLoans={(data) => handleUpdate('loans', data)} reimbursements={reimbursements} onUpdateReimbursements={(data) => handleUpdate('reimbursements', data)} isAdmin={isAdminSession} currentStaff={activeStaff} />}
+        {activePage === 'employees' && <Employees 
+          staff={staff} 
+          onUpdateStaff={(data) => handleUpdate('staff', data)} 
+          onDeleteStaff={(id) => handleDelete('staff', id)} 
+          attendances={attendances} 
+          onUpdateAttendances={(data) => handleUpdate('attendances', data)} 
+          leaves={leaves} 
+          onUpdateLeaves={(data) => handleUpdate('leaves', data)} 
+          sales={sales} 
+          currentStaff={activeStaff} 
+          isAdmin={isAdminSession} 
+          payrolls={payrolls}
+          onUpdatePayrolls={(data) => handleUpdate('payrolls', data)}
+          onAddExpense={(exp) => {
+            const expWithAuthor = { ...exp, addedBy: activeStaff?.id };
+            setExpenses(prev => [expWithAuthor, ...prev]); 
+            updateFirebase('expenses', expWithAuthor);
+          }}
+          shopSettings={shopSettings}
+        />}
+        {activePage === 'payroll' && <PayrollModule 
+          staff={staff} 
+          customers={customers}
+          payrolls={payrolls} 
+          onUpdatePayrolls={(data) => handleUpdate('payrolls', data)} 
+          loans={loans} 
+          onUpdateLoans={(data) => handleUpdate('loans', data)} 
+          customerLoans={customerLoans}
+          onUpdateCustomerLoans={(data) => handleUpdate('customer_loans', data)}
+          reimbursements={reimbursements} 
+          onUpdateReimbursements={(data) => handleUpdate('reimbursements', data)} 
+          attendances={attendances}
+          leaves={leaves}
+          shopSettings={shopSettings}
+          onAddExpense={(exp) => {
+            const expWithAuthor = { ...exp, addedBy: activeStaff?.id };
+            setExpenses(prev => [expWithAuthor, ...prev]); 
+            updateFirebase('expenses', expWithAuthor);
+          }}
+          isAdmin={isAdminSession} 
+          currentStaff={activeStaff} 
+        />}
         {activePage === 'due' && <DuePayments customers={customers} sales={sales} collections={collections} onCollection={(col, cust) => {
           const colWithAuthor = { ...col, addedBy: activeStaff?.id };
           setCollections(prev => [colWithAuthor, ...prev]); 
           setCustomers(prev => prev.map(c => c.id === cust.id ? cust : c));
           updateFirebase('collections', colWithAuthor); 
           updateFirebase('customers', cust);
-        }} rankConfigs={rankConfigs} isAdmin={isAdminSession} currentStaff={activeStaff} />}
-        {activePage === 'reports' && <Reports sales={sales} products={products} customers={customers} collections={collections} expenses={expenses} returns={returns} currentUser={activeStaff} isAdmin={isAdminSession} allStaff={staff} onCollection={() => {}} onUpdateSales={(data) => handleUpdate('sales', data)} stockEntries={stockEntries} shopSettings={shopSettings} />}
+        }} customerLoans={customerLoans} onUpdateCustomerLoans={(data) => handleUpdate('customer_loans', data)} onDeleteCustomerLoan={(id) => handleDelete('customer_loans', id)} rankConfigs={rankConfigs} isAdmin={isAdminSession} currentStaff={activeStaff} shopSettings={shopSettings} />}
+        {activePage === 'reports' && <Reports 
+          sales={sales} 
+          products={products} 
+          customers={customers} 
+          collections={collections} 
+          expenses={expenses} 
+          returns={returns} 
+          purchases={purchases}
+          productionBatches={productionBatches}
+          suppliers={suppliers}
+          currentUser={activeStaff} 
+          isAdmin={isAdminSession} 
+          allStaff={staff} 
+          onCollection={() => {}} 
+          onUpdateSales={(data) => handleUpdate('sales', data)} 
+          onDeleteSale={(id) => handleDelete('sales', id)} 
+          onSplitDelivery={handleProcessSplitDelivery}
+          stockEntries={stockEntries} 
+          shopSettings={shopSettings} 
+        />}
         {activePage === 'expenses' && <Expenses expenses={expenses} onAddExpense={(exp) => {
           const expWithAuthor = { ...exp, addedBy: activeStaff?.id };
           setExpenses(prev => [expWithAuthor, ...prev]); 
           updateFirebase('expenses', expWithAuthor);
-        }} isAdmin={isAdminSession} currentStaff={activeStaff} />}
+        }} onDeleteExpense={(id) => handleDelete('expenses', id)} isAdmin={isAdminSession} currentStaff={activeStaff} />}
         {activePage === 'settings' && <Settings staff={staff} onUpdateStaff={(data) => handleUpdate('staff', data)} roles={roles} onUpdateRoles={(data) => handleUpdate('roles', data)} categories={categories} rankConfigs={rankConfigs} onUpdateRanks={(data) => handleUpdate('ranks', data)} shopSettings={shopSettings} onUpdateShopSettings={handleUpdateShopSettings} onBackup={handleBackupData} onRestore={handleRestoreData} isAdmin={isAdminSession} />}
       </div>
     </Layout>

@@ -357,9 +357,67 @@ export interface StockEntry {
   note?: string;
 }
 
+export interface CustomerLoan {
+  id: string;
+  customerId: string;
+  customerName?: string;
+  amount: number;
+  date: string;
+  reason: string;
+  status: 'Pending' | 'Approved' | 'Rejected' | 'Paid';
+  remainingAmount: number;
+  installmentAmount: number;
+  addedBy?: string;
+}
+
+export interface CustomerLoanRepayment {
+  id: string;
+  loanId: string;
+  customerId: string;
+  amount: number;
+  date: string;
+  paymentMethod: string;
+  note?: string;
+  addedBy?: string;
+}
+
+export interface SupplierReturn {
+  id: string;
+  supplierId: string;
+  supplierName?: string;
+  productId: string;
+  productName: string;
+  quantity: number;
+  unitPrice: number;
+  totalAmount: number;
+  reason: string;
+  date: string;
+  addedBy?: string;
+}
+
+export interface ProductionBatch {
+  id: string;
+  batchNo: string;
+  producedProductName: string;
+  producedQuantity: number;
+  unit: string;
+  totalProducedValue: number;
+  date: string;
+  productId?: string;
+  productName?: string;
+  quantity?: number;
+  costPerUnit?: number;
+  totalCost?: number;
+  status?: 'planned' | 'in_progress' | 'completed';
+  startDate?: string;
+  completionDate?: string;
+  notes?: string;
+  addedBy?: string;
+}
+
 export interface Activity {
   id: string;
-  type: 'sale' | 'collection' | 'expense' | 'stock_update' | 'return' | 'purchase';
+  type: 'sale' | 'collection' | 'expense' | 'stock_update' | 'return' | 'purchase' | 'delivery';
   title: string;
   description: string;
   amount: number;
