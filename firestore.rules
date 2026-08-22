@@ -206,6 +206,11 @@ service cloud.firestore {
       allow write: if isApprovedStaff();
     }
 
+    match /company_loans/{loanId} {
+      allow read: if isApprovedStaff();
+      allow write: if isApprovedStaff();
+    }
+
     match /reimbursements/{reimbursementId} {
       allow read: if isApprovedStaff();
       allow write: if isApprovedStaff();

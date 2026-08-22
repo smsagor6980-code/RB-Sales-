@@ -2,6 +2,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { auth, db } from './services/firebase';
 import { collection, doc, setDoc, onSnapshot, getDoc, getDocs, query, where, orderBy, limit, writeBatch, deleteDoc } from 'firebase/firestore';
+import { sanitizeDocumentData } from './services/imageCompressor';
 
 enum OperationType {
   CREATE = 'create',
@@ -31,7 +32,7 @@ interface FirestoreErrorInfo {
   }
 }
 
-import { Product, Customer, Sale, Collection, Activity, Expense, ProductCategory, Staff, Supplier, RankConfig, AppRole, ProductReturn, Purchase, Attendance, LeaveRequest, Payroll, AdvanceLoan, CustomerLoan, CustomerLoanRepayment, ExpenseReimbursement, WishlistItem, AppNotification, CartItem, ShopSettings, SupplierPayment, SupplierReturn, StockEntry, ProductionBatch } from './types';
+import { Product, Customer, Sale, Collection, Activity, Expense, ProductCategory, Staff, Supplier, RankConfig, AppRole, ProductReturn, Purchase, Attendance, LeaveRequest, Payroll, AdvanceLoan, CustomerLoan, CustomerLoanRepayment, ExpenseReimbursement, WishlistItem, AppNotification, CartItem, ShopSettings, SupplierPayment, SupplierReturn, StockEntry, ProductionBatch, CompanyLoan } from './types';
 import Layout from './components/Layout';
 import Auth from './components/Auth';
 import Dashboard from './components/Dashboard';
@@ -47,6 +48,7 @@ import OrderApprovals from './components/OrderApprovals';
 import Returns from './components/Returns';
 import Employees from './components/Employees';
 import PayrollModule from './components/Payroll';
+import { CompanyLoans } from './components/loans/CompanyLoans';
 
 import { EcommerceLayout, ShopHome, CustomerAuth, CartDrawer, CheckoutModal, CustomerProfile, ProductDetailModal, OrderDetailModal } from './components/ecommerce';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -153,6 +155,7 @@ const App: React.FC = () => {
   const [payrolls, setPayrolls] = useState<Payroll[]>([]);
   const [loans, setLoans] = useState<AdvanceLoan[]>([]);
   const [customerLoans, setCustomerLoans] = useState<CustomerLoan[]>([]);
+  const [companyLoans, setCompanyLoans] = useState<CompanyLoan[]>([]);
   const [reimbursements, setReimbursements] = useState<ExpenseReimbursement[]>([]);
   
   const [activePage, setActivePage] = useState('dashboard');
@@ -219,7 +222,10 @@ const App: React.FC = () => {
     }
     setIsSyncing(true);
     try {
-      // Remove undefined values recursively to avoid Firestore errors
+      // 1. Sanitize and compress any large image payloads (data URLs) to protect against Firestore 1MB document limit
+      const sanitizedData = await sanitizeDocumentData(data);
+
+      // 2. Remove undefined values recursively to avoid Firestore errors
       const clean = (val: any): any => {
         if (val === undefined) return null;
         if (Array.isArray(val)) return val.map(clean);
@@ -231,7 +237,7 @@ const App: React.FC = () => {
         return val;
       };
 
-      const cleanData = clean(data);
+      const cleanData = clean(sanitizedData);
       console.log(`Syncing to Firebase: ${path} ${id ? `(${id})` : ''}`, { isArray: Array.isArray(cleanData) });
       
       if (id) {
@@ -433,6 +439,7 @@ const App: React.FC = () => {
                 { path: 'payrolls', setter: setPayrolls },
                 { path: 'loans', setter: setLoans },
                 { path: 'customer_loans', setter: setCustomerLoans },
+                { path: 'company_loans', setter: setCompanyLoans },
                 { path: 'reimbursements', setter: setReimbursements },
                 { path: 'stock_entries', setter: setStockEntries },
                 { path: 'production_batches', setter: setProductionBatches },
@@ -510,6 +517,7 @@ const App: React.FC = () => {
                           { path: 'payrolls', setter: setPayrolls },
                           { path: 'loans', setter: setLoans },
                           { path: 'customer_loans', setter: setCustomerLoans },
+                          { path: 'company_loans', setter: setCompanyLoans },
                           { path: 'reimbursements', setter: setReimbursements },
                           { path: 'stock_entries', setter: setStockEntries },
                           { path: 'supplier_returns', setter: setSupplierReturns },
@@ -1353,8 +1361,9 @@ const App: React.FC = () => {
         onGoCategories={() => setShopPage('categories')}
         onLogout={() => { auth?.signOut(); setActiveCustomer(null); }}
         customerName={activeCustomer?.name}
+        isCustomer={!!activeCustomer}
         isAdmin={isAdminSession || !!activeStaff}
-        onSwitchToAdmin={() => setViewMode('admin')}
+        onSwitchToAdmin={(isAdminSession || !!activeStaff || !activeCustomer) ? () => setViewMode('admin') : undefined}
         shopSettings={shopSettings}
       >
         {shopSettings?.shopStatus === 'closed' && !isAdminSession && !activeStaff && (
@@ -1375,7 +1384,17 @@ const App: React.FC = () => {
           </div>
         )}
         {!activeCustomer && (isCheckoutOpen || isProfileOpen) ? (
-          <CustomerAuth onSuccess={(c) => { setActiveCustomer(c); }} onBack={() => { setIsCheckoutOpen(false); setIsProfileOpen(false); }} />
+          <CustomerAuth 
+            onSuccess={(c) => { 
+              setActiveCustomer(c);
+              setCustomers(prev => {
+                const filtered = prev.filter(item => item.id !== c.id && item.uid !== c.uid);
+                return [c, ...filtered];
+              });
+              updateFirebase('customers', c, c.id);
+            }} 
+            onBack={() => { setIsCheckoutOpen(false); setIsProfileOpen(false); }} 
+          />
         ) : (
           <>
             <ShopHome 
@@ -1601,6 +1620,19 @@ const App: React.FC = () => {
           }}
           isAdmin={isAdminSession} 
           currentStaff={activeStaff} 
+        />}
+        {activePage === 'company_loans' && <CompanyLoans 
+          companyLoans={companyLoans}
+          onUpdateLoan={(loan) => handleUpdate('company_loans', loan)}
+          onDeleteLoan={(id) => handleDelete('company_loans', id)}
+          onAddExpense={(exp) => {
+            const expWithAuthor = { ...exp, id: `exp_${Date.now()}`, addedBy: activeStaff?.id };
+            setExpenses(prev => [expWithAuthor, ...prev]);
+            updateFirebase('expenses', expWithAuthor);
+          }}
+          shopSettings={shopSettings}
+          isAdmin={isAdminSession}
+          currentStaff={activeStaff}
         />}
         {activePage === 'due' && <DuePayments customers={customers} sales={sales} collections={collections} onCollection={(col, cust) => {
           const colWithAuthor = { ...col, addedBy: activeStaff?.id };

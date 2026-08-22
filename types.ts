@@ -71,6 +71,7 @@ export interface Product {
   category: string;
   description?: string;
   imageUrl?: string;
+  images?: string[];
   dateAdded: string;
   status?: 'active' | 'inactive';
   productType?: 'finished_good' | 'raw_material';
@@ -257,6 +258,10 @@ export interface Customer {
   addedBy?: string; // Track who added the customer
   wishlist?: WishlistItem[];
   notifications?: AppNotification[];
+  verifiedPhone?: boolean;
+  verifiedEmail?: boolean;
+  verifiedAt?: string;
+  authProvider?: string;
 }
 
 export interface Supplier {
@@ -565,6 +570,96 @@ export interface Activity {
   amount: number;
   date: string;
   addedBy?: string;
+}
+
+export type LoanInterestType = 'monthly' | 'yearly' | 'flat' | 'reducing';
+export type LoanInstallmentFrequency = 'weekly' | 'monthly' | 'quarterly' | 'yearly' | 'one_time';
+export type LoanStatus = 'active' | 'completed' | 'overdue' | 'closed';
+export type LoanType = 'bank_loan' | 'ngo_loan' | 'sme_loan' | 'personal_loan' | 'mortgage' | 'microcredit' | 'credit_line' | 'other';
+
+export interface LoanDocument {
+  id: string;
+  name: string;
+  type: string; // 'agreement' | 'bank_statement' | 'receipt' | 'cheque' | 'collateral' | 'other'
+  fileUrl: string; // base64 or URL
+  fileSize?: string;
+  uploadDate: string;
+  notes?: string;
+}
+
+export interface LoanPayment {
+  id: string;
+  loanId: string;
+  installmentNo?: number;
+  paymentDate: string;
+  amount: number; // Total paid
+  principalPaid: number; // Principal portion
+  interestPaid: number; // Interest portion
+  penaltyPaid?: number; // Late fee or penalty portion
+  paymentMethod: 'cash' | 'bank' | 'cheque' | 'bkash' | 'nagad' | 'rocket' | 'other';
+  bankAccount?: string;
+  transactionRef?: string;
+  receiptNumber?: string;
+  receiptUrl?: string;
+  notes?: string;
+  isEarlyPayment?: boolean;
+  addedBy?: string;
+  addedByName?: string;
+  createdAt: string;
+}
+
+export interface CompanyLoan {
+  id: string;
+  loanIdNumber?: string; // Display Loan ID, e.g. "LOAN-2026-001"
+  providerName: string; // Bank, NGO, Company, Person name
+  providerType: 'bank' | 'ngo' | 'company' | 'individual' | 'financial_institution';
+  providerPhone?: string;
+  providerEmail?: string;
+  providerAddress?: string;
+  loanType: LoanType;
+  principalAmount: number; // Asol taka
+  loanDate: string; // Loan taken date
+  firstPaymentDate: string;
+  dueDate: string; // Final maturity date
+  
+  interestRate: number; // %
+  interestType: LoanInterestType;
+  loanTenure: number; // in months/periods
+  installmentFrequency: LoanInstallmentFrequency;
+  
+  totalInstallments: number;
+  installmentAmount: number;
+  totalInterest: number;
+  totalPayable: number;
+  
+  totalPaidAmount: number;
+  totalPrincipalPaid: number;
+  totalInterestPaid: number;
+  totalPenaltyPaid: number;
+  totalPenaltyDue: number;
+  
+  remainingLoan: number; // Outstanding total
+  remainingPrincipal: number; // Outstanding principal
+  
+  nextPaymentDate?: string;
+  nextPaymentAmount?: number;
+  
+  collateralSecurity?: string;
+  bankAccountNumber?: string;
+  referenceNumber?: string;
+  notes?: string;
+  
+  documents: LoanDocument[];
+  payments: LoanPayment[];
+  
+  status: LoanStatus; // 'active' | 'completed' | 'overdue' | 'closed'
+  closedDate?: string;
+  closureReason?: string;
+  
+  createdAt: string;
+  updatedAt: string;
+  addedBy?: string;
+  addedByName?: string;
 }
 
 export function calculateLowStockAlerts(products: Product[]): Product[] {

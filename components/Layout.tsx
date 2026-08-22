@@ -19,6 +19,7 @@ import {
   RotateCcw,
   UserCog,
   Banknote,
+  Landmark,
   ShoppingBag,
   Camera,
   Upload,
@@ -218,9 +219,9 @@ const Layout: React.FC<LayoutProps> = ({
 
   // Default standard fallback permissions for roles if database roles are empty
   const DEFAULT_PERMISSIONS: Record<string, string[]> = {
-    'owner': ['dashboard', 'sales', 'approvals', 'products', 'customers', 'suppliers', 'returns', 'employees', 'payroll', 'expenses', 'due', 'reports', 'settings'],
-    'admin': ['dashboard', 'sales', 'approvals', 'products', 'customers', 'suppliers', 'returns', 'employees', 'payroll', 'expenses', 'due', 'reports', 'settings'],
-    'manager': ['dashboard', 'sales', 'approvals', 'products', 'customers', 'suppliers', 'returns', 'expenses', 'due', 'reports'],
+    'owner': ['dashboard', 'sales', 'approvals', 'products', 'customers', 'suppliers', 'returns', 'employees', 'payroll', 'company_loans', 'expenses', 'due', 'reports', 'settings'],
+    'admin': ['dashboard', 'sales', 'approvals', 'products', 'customers', 'suppliers', 'returns', 'employees', 'payroll', 'company_loans', 'expenses', 'due', 'reports', 'settings'],
+    'manager': ['dashboard', 'sales', 'approvals', 'products', 'customers', 'suppliers', 'returns', 'company_loans', 'expenses', 'due', 'reports'],
     'salesman': ['dashboard', 'sales', 'products', 'customers', 'returns', 'due'],
   };
 
@@ -253,6 +254,7 @@ const Layout: React.FC<LayoutProps> = ({
     { id: 'returns', label: 'রিটার্ন', icon: RotateCcw, color: 'text-rose-600', bg: 'bg-rose-50' },
     { id: 'employees', label: 'কর্মচারী ও HR', icon: UserCog, color: 'text-cyan-600', bg: 'bg-cyan-50' },
     { id: 'payroll', label: 'পেরোল', icon: Banknote, color: 'text-emerald-600', bg: 'bg-emerald-50' },
+    { id: 'company_loans', label: 'Company Loan 💰', icon: Landmark, color: 'text-amber-600', bg: 'bg-amber-50' },
     { id: 'expenses', label: 'খরচ (Expenses)', icon: TrendingDown, color: 'text-rose-600', bg: 'bg-rose-50' },
     { id: 'due', label: 'বকেয়া তালিকা', icon: FileText, color: 'text-orange-600', bg: 'bg-orange-50' },
     { id: 'reports', label: 'রিপোর্ট', icon: FileBarChart, color: 'text-purple-600', bg: 'bg-purple-50' },

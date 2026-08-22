@@ -150,7 +150,14 @@ const CustomerProfile: React.FC<CustomerProfileProps> = ({
                   />
                 )}
               </h2>
-              <p className="text-[8px] sm:text-[10px] font-black text-slate-400 uppercase tracking-widest mt-0.5 sm:mt-1">{customer.phone}</p>
+              <div className="flex items-center gap-1.5 mt-0.5 sm:mt-1">
+                <p className="text-[8px] sm:text-[10px] font-black text-slate-400 uppercase tracking-widest">{customer.phone}</p>
+                {(customer.verifiedPhone || customer.verifiedEmail) && (
+                  <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 bg-emerald-50 text-emerald-600 rounded-md text-[8px] font-black tracking-wide border border-emerald-200">
+                    <ShieldCheck size={10} /> OTP ভেরিফাইড
+                  </span>
+                )}
+              </div>
             </div>
           </div>
           <button onClick={onClose} className="p-2 rounded-xl hover:bg-slate-100 text-slate-400 transition-colors md:hidden">

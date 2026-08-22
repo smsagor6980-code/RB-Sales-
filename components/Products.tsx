@@ -5,11 +5,14 @@ import {
   Loader2, Package, LayoutGrid, List as ListIcon,
   Tag, DollarSign, Info, AlertCircle, Save, Truck, Calendar, History, TrendingUp,
   BarChart3, Clock, CheckCircle2, ChevronRight, Calculator, Minus, Sparkles,
-  Layers, Factory, ArrowRightLeft, ArrowUpRight, Check, AlertTriangle, ShieldCheck
+  Layers, Factory, ArrowRightLeft, ArrowUpRight, Check, AlertTriangle, ShieldCheck,
+  Camera, Image as ImageIcon, Eye, Sliders, ArrowLeft, ArrowRight, Maximize2
 } from 'lucide-react';
 import { storage, auth } from '../services/firebase';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { motion, AnimatePresence } from 'framer-motion';
+import { ProductPhotoStudio, PhotoEditorModal } from './ProductPhotoStudio';
+import { compressImage } from '../services/imageCompressor';
 
 interface ProductsProps {
   products: Product[];
@@ -58,6 +61,11 @@ const Products: React.FC<ProductsProps> = ({
   
   const [isUploading, setIsUploading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Photo & Lightbox States
+  const [quickEditPhotoProduct, setQuickEditPhotoProduct] = useState<Product | null>(null);
+  const [previewLightboxProduct, setPreviewLightboxProduct] = useState<Product | null>(null);
+  const [lightboxImageIndex, setLightboxImageIndex] = useState<number>(0);
 
   // Daily Stock Entry Form
   const [stockEntryForm, setStockEntryForm] = useState({
@@ -200,23 +208,23 @@ const Products: React.FC<ProductsProps> = ({
   const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    
-    if (file.size > 5 * 1024 * 1024) {
-      alert("ফাইলটি অনেক বড়! দয়া করে ৫ মেগাবাইটের নিচের ছবি আপলোড করুন।");
-      return;
-    }
 
     setIsUploading(true);
 
     let base64Fallback: string | null = null;
     try {
-      base64Fallback = await resizeImage(file);
+      base64Fallback = await compressImage(file, { maxWidth: 600, maxHeight: 600, quality: 0.72 });
     } catch (err) {
-      console.log("Local base64 resize failed:", err);
+      console.log("Image compression failed, fallback to resize:", err);
+      try {
+        base64Fallback = await resizeImage(file);
+      } catch (rErr) {
+        console.warn("Resize fallback failed:", rErr);
+      }
     }
 
     if (base64Fallback) {
-      setFormData(prev => ({ ...prev, imageUrl: base64Fallback }));
+      setFormData(prev => ({ ...prev, imageUrl: base64Fallback! }));
     }
 
     if (storage && auth.currentUser && base64Fallback) {
@@ -251,6 +259,7 @@ const Products: React.FC<ProductsProps> = ({
       minStock: 5,
       category: 'other',
       imageUrl: '',
+      images: [],
       status: 'active',
       productType: type,
       rawMaterialCategory: 'general',
@@ -265,6 +274,8 @@ const Products: React.FC<ProductsProps> = ({
     setEditingId(p.id);
     setFormData({
       ...p,
+      imageUrl: p.imageUrl || '',
+      images: p.images || (p.imageUrl ? [p.imageUrl] : []),
       productType: p.productType || 'finished_good'
     });
     setShowModal(true);
@@ -291,6 +302,8 @@ const Products: React.FC<ProductsProps> = ({
       minStock: Number(formData.minStock) || 5,
       unit: formData.unit || (formData.productType === 'raw_material' ? 'kg' : 'pcs'),
       category: formData.category || 'other',
+      imageUrl: formData.imageUrl || '',
+      images: formData.images || (formData.imageUrl ? [formData.imageUrl] : []),
       productType: formData.productType || 'finished_good',
       supplierId: formData.supplierId || '',
       supplierName: selectedSupplier?.name || formData.supplierName || '',
@@ -708,26 +721,74 @@ const Products: React.FC<ProductsProps> = ({
                   >
                     <div>
                       {/* Product Image / Icon Banner */}
-                      <div className="aspect-square bg-slate-50 rounded-2xl mb-4 overflow-hidden relative flex items-center justify-center group-hover:scale-[1.02] transition-transform">
+                      <div className="aspect-square bg-slate-50 rounded-2xl mb-4 overflow-hidden relative flex items-center justify-center group/img transition-transform">
                         {p.imageUrl ? (
-                          <img src={p.imageUrl} alt={p.name} className="w-full h-full object-contain p-2" />
+                          <img 
+                            src={p.imageUrl} 
+                            alt={p.name} 
+                            onClick={() => {
+                              setPreviewLightboxProduct(p);
+                              setLightboxImageIndex(0);
+                            }}
+                            className="w-full h-full object-contain p-2 cursor-pointer hover:scale-105 transition-transform" 
+                          />
                         ) : (
-                          <div className={`p-6 rounded-3xl ${isRaw ? 'bg-amber-100 text-amber-600' : 'bg-primary/10 text-primary'}`}>
+                          <div 
+                            onClick={() => setQuickEditPhotoProduct(p)}
+                            className={`p-6 rounded-3xl cursor-pointer hover:opacity-80 transition-opacity ${isRaw ? 'bg-amber-100 text-amber-600' : 'bg-primary/10 text-primary'}`}
+                          >
                             {isRaw ? <Layers size={40}/> : <Package size={40}/>}
                           </div>
                         )}
-                        <div className="absolute top-3 left-3">
+
+                        {/* Top Badges */}
+                        <div className="absolute top-3 left-3 flex flex-col gap-1 items-start pointer-events-none">
                           <span className={`px-3 py-1 rounded-full text-[9px] font-black uppercase tracking-wider shadow-sm ${isRaw ? 'bg-amber-500 text-white' : 'bg-indigo-600 text-white'}`}>
                             {isRaw ? '🌾 কাঁচামাল' : '📦 রেডি পণ্য'}
                           </span>
+                          {p.images && p.images.length > 1 && (
+                            <span className="bg-slate-900/80 backdrop-blur-sm text-white px-2 py-0.5 rounded-md text-[9px] font-black flex items-center gap-1 shadow-sm">
+                              <ImageIcon size={10}/> {p.images.length} ফটো
+                            </span>
+                          )}
                         </div>
+
                         {isLow && (
-                          <div className="absolute top-3 right-3">
+                          <div className="absolute top-3 right-3 pointer-events-none">
                             <span className="bg-rose-500 text-white px-2.5 py-1 rounded-full text-[9px] font-black uppercase tracking-wider flex items-center gap-1 shadow-sm animate-pulse">
                               <AlertTriangle size={10}/> লো স্টক
                             </span>
                           </div>
                         )}
+
+                        {/* Quick Photo Action Overlay on Hover */}
+                        <div className="absolute inset-x-2 bottom-2 bg-slate-900/80 backdrop-blur-md py-1.5 px-3 rounded-xl opacity-0 group-hover/img:opacity-100 transition-all flex items-center justify-around gap-2 shadow-lg">
+                          {p.imageUrl && (
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setPreviewLightboxProduct(p);
+                                setLightboxImageIndex(0);
+                              }}
+                              className="text-white hover:text-indigo-300 text-[10px] font-bold flex items-center gap-1 transition-colors"
+                              title="বড় করে দেখুন"
+                            >
+                              <Eye size={12}/> দেখুন
+                            </button>
+                          )}
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setQuickEditPhotoProduct(p);
+                            }}
+                            className="text-emerald-400 hover:text-emerald-300 text-[10px] font-bold flex items-center gap-1 transition-colors"
+                            title="ছবি এডিট বা পরিবর্তন করুন"
+                          >
+                            <Sliders size={12}/> এডিট / ছবি
+                          </button>
+                        </div>
                       </div>
 
                       {/* Info */}
@@ -825,16 +886,37 @@ const Products: React.FC<ProductsProps> = ({
                         <tr key={p.id} className="hover:bg-slate-50/50 transition-colors">
                           <td className="p-5">
                             <div className="flex items-center gap-3">
-                              <div className="w-10 h-10 bg-slate-100 rounded-xl overflow-hidden flex items-center justify-center shrink-0">
+                              <div 
+                                onClick={() => {
+                                  if (p.imageUrl) {
+                                    setPreviewLightboxProduct(p);
+                                    setLightboxImageIndex(0);
+                                  } else {
+                                    setQuickEditPhotoProduct(p);
+                                  }
+                                }}
+                                className="w-12 h-12 bg-slate-100 rounded-2xl overflow-hidden flex items-center justify-center shrink-0 cursor-pointer relative group/tblimg hover:ring-2 hover:ring-primary/40 transition-all"
+                                title="ছবি বড় করে দেখুন বা পরিবর্তন করুন"
+                              >
                                 {p.imageUrl ? (
                                   <img src={p.imageUrl} alt={p.name} className="w-full h-full object-cover" />
                                 ) : (
-                                  isRaw ? <Layers size={18} className="text-amber-600"/> : <Package size={18} className="text-primary"/>
+                                  isRaw ? <Layers size={20} className="text-amber-600"/> : <Package size={20} className="text-primary"/>
                                 )}
+                                <div className="absolute inset-0 bg-slate-900/60 opacity-0 group-hover/tblimg:opacity-100 transition-opacity flex items-center justify-center text-white">
+                                  <Sliders size={14} />
+                                </div>
                               </div>
                               <div>
-                                <span className="font-black text-slate-800 block">{p.name}</span>
-                                {p.sku && <span className="text-[10px] font-bold text-slate-400">SKU: {p.sku}</span>}
+                                <span className="font-black text-slate-800 block hover:text-primary transition-colors cursor-pointer" onClick={() => openEditModal(p)}>{p.name}</span>
+                                <div className="flex items-center gap-2 mt-0.5">
+                                  {p.sku && <span className="text-[10px] font-bold text-slate-400">SKU: {p.sku}</span>}
+                                  {p.images && p.images.length > 1 && (
+                                    <span className="text-[9px] font-black text-indigo-600 bg-indigo-50 px-1.5 py-0.2 rounded">
+                                      {p.images.length} ফটো
+                                    </span>
+                                  )}
+                                </div>
                               </div>
                             </div>
                           </td>
@@ -856,9 +938,16 @@ const Products: React.FC<ProductsProps> = ({
                           <td className="p-5 font-black text-slate-800">৳{((p.stock || 0) * (p.purchasePrice || 0)).toLocaleString()}</td>
                           <td className="p-5 text-right">
                             <div className="flex items-center justify-end gap-2">
-                              <button onClick={() => openEditModal(p)} className="p-2 hover:bg-slate-100 text-slate-600 rounded-xl transition-all"><Edit size={16}/></button>
+                              <button 
+                                onClick={() => setQuickEditPhotoProduct(p)} 
+                                className="p-2 hover:bg-indigo-50 text-indigo-600 rounded-xl transition-all"
+                                title="ছবি এডিট / পরিবর্তন করুন"
+                              >
+                                <Camera size={16}/>
+                              </button>
+                              <button onClick={() => openEditModal(p)} className="p-2 hover:bg-slate-100 text-slate-600 rounded-xl transition-all" title="তথ্য এডিট করুন"><Edit size={16}/></button>
                               {onDelete && (
-                                <button onClick={() => window.confirm(`"${p.name}" মুছবেন?`) && onDelete(p.id)} className="p-2 hover:bg-rose-50 text-rose-500 rounded-xl transition-all"><Trash2 size={16}/></button>
+                                <button onClick={() => window.confirm(`"${p.name}" মুছবেন?`) && onDelete(p.id)} className="p-2 hover:bg-rose-50 text-rose-500 rounded-xl transition-all" title="মুছে ফেলুন"><Trash2 size={16}/></button>
                               )}
                             </div>
                           </td>
@@ -1053,6 +1142,14 @@ const Products: React.FC<ProductsProps> = ({
                   <Layers size={16}/> 🌾 কাঁচামাল (Raw Material)
                 </button>
               </div>
+
+              {/* Product Photo Studio & Gallery Manager */}
+              <ProductPhotoStudio 
+                primaryImage={formData.imageUrl}
+                galleryImages={formData.images || []}
+                onChange={(primary, gallery) => setFormData(prev => ({ ...prev, imageUrl: primary, images: gallery }))}
+                productName={formData.name || (formData.productType === 'raw_material' ? 'কাঁচামাল' : 'পণ্য')}
+              />
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
                 <div className="space-y-2">
@@ -1554,6 +1651,190 @@ const Products: React.FC<ProductsProps> = ({
                 </div>
               ))}
             </div>
+          </motion.div>
+        </div>
+      )}
+      {/* MODAL 5: Quick Photo Studio Modal for a specific product */}
+      {quickEditPhotoProduct && (
+        <div className="fixed inset-0 z-[120] flex items-center justify-center p-4 bg-slate-900/70 backdrop-blur-md">
+          <motion.div 
+            initial={{ scale: 0.9, opacity: 0 }} 
+            animate={{ scale: 1, opacity: 1 }} 
+            className="bg-white w-full max-w-2xl rounded-[36px] overflow-hidden shadow-2xl p-6 sm:p-8 max-h-[90vh] flex flex-col"
+          >
+            <div className="flex justify-between items-center pb-4 border-b border-slate-100 mb-6">
+              <div className="flex items-center gap-3">
+                <div className="w-12 h-12 bg-indigo-50 text-indigo-600 rounded-2xl flex items-center justify-center">
+                  <Camera size={24}/>
+                </div>
+                <div>
+                  <h3 className="text-lg font-black text-slate-800 tracking-tight">পণ্য ফটো স্টুডিও ও এডিটর</h3>
+                  <p className="text-xs font-bold text-slate-500">{quickEditPhotoProduct.name}</p>
+                </div>
+              </div>
+              <button 
+                onClick={() => setQuickEditPhotoProduct(null)} 
+                className="p-2 hover:bg-slate-100 text-slate-400 hover:text-slate-700 rounded-xl transition-all"
+              >
+                <X size={20}/>
+              </button>
+            </div>
+
+            <div className="overflow-y-auto flex-1 pr-1 custom-scrollbar">
+              <ProductPhotoStudio
+                primaryImage={quickEditPhotoProduct.imageUrl}
+                galleryImages={quickEditPhotoProduct.images || (quickEditPhotoProduct.imageUrl ? [quickEditPhotoProduct.imageUrl] : [])}
+                onChange={(primary, gallery) => {
+                  setQuickEditPhotoProduct(prev => prev ? ({
+                    ...prev,
+                    imageUrl: primary,
+                    images: gallery
+                  }) : null);
+                }}
+                productName={quickEditPhotoProduct.name}
+              />
+            </div>
+
+            <div className="pt-4 border-t border-slate-100 mt-4 flex justify-end gap-3">
+              <button
+                type="button"
+                onClick={() => setQuickEditPhotoProduct(null)}
+                className="px-5 py-3 rounded-2xl font-bold text-xs text-slate-500 hover:bg-slate-100 transition-all"
+              >
+                বাতিল
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  if (quickEditPhotoProduct) {
+                    onUpdate([quickEditPhotoProduct]);
+                    setQuickEditPhotoProduct(null);
+                  }
+                }}
+                className="bg-indigo-600 hover:bg-indigo-700 text-white px-6 py-3 rounded-2xl font-black text-xs uppercase tracking-wider shadow-lg shadow-indigo-600/20 active:scale-95 transition-all flex items-center gap-2"
+              >
+                <Save size={16}/> পরিবর্তন সংরক্ষণ করুন
+              </button>
+            </div>
+          </motion.div>
+        </div>
+      )}
+
+      {/* MODAL 6: Fullscreen Lightbox Photo Preview */}
+      {previewLightboxProduct && (
+        <div className="fixed inset-0 z-[130] flex items-center justify-center p-4 bg-black/90 backdrop-blur-lg">
+          <motion.div 
+            initial={{ scale: 0.92, opacity: 0 }} 
+            animate={{ scale: 1, opacity: 1 }} 
+            className="w-full max-w-4xl max-h-[92vh] flex flex-col justify-between"
+          >
+            {/* Lightbox Header */}
+            <div className="flex justify-between items-center text-white pb-3 px-2">
+              <div className="flex items-center gap-3">
+                <div className="bg-white/10 p-2 rounded-xl backdrop-blur-sm">
+                  <Package size={20} className="text-white"/>
+                </div>
+                <div>
+                  <h4 className="font-black text-base text-white">{previewLightboxProduct.name}</h4>
+                  <p className="text-[11px] font-medium text-slate-300">
+                    {previewLightboxProduct.category || 'সাধারণ'} • {previewLightboxProduct.stock} {previewLightboxProduct.unit} মজুদ
+                  </p>
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    const target = previewLightboxProduct;
+                    setPreviewLightboxProduct(null);
+                    setQuickEditPhotoProduct(target);
+                  }}
+                  className="bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-2 rounded-xl text-xs font-black flex items-center gap-1.5 shadow-lg transition-all"
+                >
+                  <Sliders size={14}/> ফটো এডিট করুন
+                </button>
+                <button 
+                  onClick={() => setPreviewLightboxProduct(null)} 
+                  className="p-2 text-white/70 hover:text-white hover:bg-white/10 rounded-xl transition-all"
+                >
+                  <X size={24}/>
+                </button>
+              </div>
+            </div>
+
+            {/* Main Lightbox Image with Next/Prev navigation */}
+            <div className="relative flex items-center justify-center my-4 h-[60vh]">
+              {(() => {
+                const allImages = previewLightboxProduct.images && previewLightboxProduct.images.length > 0
+                  ? previewLightboxProduct.images
+                  : previewLightboxProduct.imageUrl ? [previewLightboxProduct.imageUrl] : [];
+                
+                const activeImg = allImages[lightboxImageIndex] || previewLightboxProduct.imageUrl;
+
+                if (!activeImg) {
+                  return (
+                    <div className="text-white/60 text-center">
+                      <ImageIcon size={48} className="mx-auto mb-2 opacity-50"/>
+                      <p className="text-sm font-bold">কোনো ছবি নেই</p>
+                    </div>
+                  );
+                }
+
+                return (
+                  <>
+                    <img 
+                      src={activeImg} 
+                      alt={previewLightboxProduct.name} 
+                      className="max-h-full max-w-full object-contain rounded-2xl shadow-2xl drop-shadow-2xl" 
+                    />
+
+                    {allImages.length > 1 && (
+                      <>
+                        <button
+                          type="button"
+                          onClick={() => setLightboxImageIndex(prev => (prev > 0 ? prev - 1 : allImages.length - 1))}
+                          className="absolute left-2 top-1/2 -translate-y-1/2 bg-white/20 hover:bg-white/40 text-white p-3 rounded-full backdrop-blur-md transition-all active:scale-95"
+                          title="পূর্ববর্তী ছবি"
+                        >
+                          <ArrowLeft size={20}/>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setLightboxImageIndex(prev => (prev < allImages.length - 1 ? prev + 1 : 0))}
+                          className="absolute right-2 top-1/2 -translate-y-1/2 bg-white/20 hover:bg-white/40 text-white p-3 rounded-full backdrop-blur-md transition-all active:scale-95"
+                          title="পরবর্তী ছবি"
+                        >
+                          <ArrowRight size={20}/>
+                        </button>
+                      </>
+                    )}
+                  </>
+                );
+              })()}
+            </div>
+
+            {/* Thumbnails list */}
+            {(() => {
+              const allImages = previewLightboxProduct.images && previewLightboxProduct.images.length > 0
+                ? previewLightboxProduct.images
+                : previewLightboxProduct.imageUrl ? [previewLightboxProduct.imageUrl] : [];
+
+              if (allImages.length <= 1) return null;
+
+              return (
+                <div className="flex items-center justify-center gap-2 pt-2 overflow-x-auto">
+                  {allImages.map((img, idx) => (
+                    <button
+                      key={idx}
+                      onClick={() => setLightboxImageIndex(idx)}
+                      className={`w-14 h-14 rounded-xl overflow-hidden border-2 transition-all shrink-0 ${lightboxImageIndex === idx ? 'border-white scale-110 shadow-lg' : 'border-transparent opacity-60 hover:opacity-100'}`}
+                    >
+                      <img src={img} alt={`Thumb ${idx}`} className="w-full h-full object-cover" />
+                    </button>
+                  ))}
+                </div>
+              );
+            })()}
           </motion.div>
         </div>
       )}

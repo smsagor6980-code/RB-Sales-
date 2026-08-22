@@ -1089,8 +1089,13 @@ const Customers: React.FC<CustomersProps> = ({
                               />
                             )}
                           </div>
-                          <div className="text-[10px] text-slate-400 font-bold font-mono">
-                            ID: #{c.id.slice(-6)} • {c.dateAdded ? c.dateAdded.split('T')[0] : 'N/A'}
+                          <div className="text-[10px] text-slate-400 font-bold font-mono flex items-center gap-1.5 mt-0.5">
+                            <span>ID: #{c.id.slice(-6)} • {c.dateAdded ? c.dateAdded.split('T')[0] : 'N/A'}</span>
+                            {(c.verifiedPhone || c.verifiedEmail) && (
+                              <span className="inline-flex items-center gap-0.5 px-1.5 py-0.2 bg-emerald-50 text-emerald-600 rounded text-[8px] font-black border border-emerald-200" title="OTP ভেরিফাইড রিয়েল কাস্টমার">
+                                <ShieldCheck size={9} /> ভেরিফাইড
+                              </span>
+                            )}
                           </div>
                         </div>
                       </div>
