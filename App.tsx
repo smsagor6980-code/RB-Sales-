@@ -1661,11 +1661,23 @@ const App: React.FC = () => {
           stockEntries={stockEntries} 
           shopSettings={shopSettings} 
         />}
-        {activePage === 'expenses' && <Expenses expenses={expenses} onAddExpense={(exp) => {
-          const expWithAuthor = { ...exp, addedBy: activeStaff?.id };
-          setExpenses(prev => [expWithAuthor, ...prev]); 
-          updateFirebase('expenses', expWithAuthor);
-        }} onDeleteExpense={(id) => handleDelete('expenses', id)} isAdmin={isAdminSession} currentStaff={activeStaff} />}
+        {activePage === 'expenses' && <Expenses 
+          expenses={expenses} 
+          onAddExpense={(exp) => {
+            const expWithAuthor = { ...exp, addedBy: activeStaff?.id, addedByName: activeStaff?.name };
+            setExpenses(prev => [expWithAuthor, ...prev]); 
+            updateFirebase('expenses', expWithAuthor);
+          }} 
+          onUpdateExpense={(exp) => {
+            setExpenses(prev => prev.map(e => e.id === exp.id ? exp : e));
+            updateFirebase('expenses', exp);
+          }}
+          onDeleteExpense={(id) => handleDelete('expenses', id)} 
+          isAdmin={isAdminSession} 
+          currentStaff={activeStaff} 
+          allStaff={staff}
+          shopSettings={shopSettings}
+        />}
         {activePage === 'settings' && <Settings staff={staff} onUpdateStaff={(data) => handleUpdate('staff', data)} roles={roles} onUpdateRoles={(data) => handleUpdate('roles', data)} categories={categories} rankConfigs={rankConfigs} onUpdateRanks={(data) => handleUpdate('ranks', data)} shopSettings={shopSettings} onUpdateShopSettings={handleUpdateShopSettings} onBackup={handleBackupData} onRestore={handleRestoreData} isAdmin={isAdminSession} />}
       </div>
     </Layout>

@@ -540,13 +540,36 @@ export interface Collection {
   addedBy?: string;
 }
 
+export interface ExpenseCategory {
+  id: string;
+  name: string;
+  nameBn: string;
+  icon?: string;
+  color?: string;
+  budgetMonthly?: number;
+  isDefault?: boolean;
+}
+
 export interface Expense {
   id: string;
+  expenseNo?: string;
   amount: number;
   category: string;
+  categoryName?: string;
   description: string;
   date: string;
+  time?: string;
+  paymentMethod?: string;
+  paidTo?: string;
+  referenceNo?: string;
+  receiptUrl?: string;
+  isRecurring?: boolean;
+  recurringFrequency?: 'daily' | 'weekly' | 'monthly' | 'yearly';
+  tags?: string[];
   addedBy?: string;
+  addedByName?: string;
+  createdAt?: string;
+  updatedAt?: string;
 }
 
 export interface StockEntry {
