@@ -235,9 +235,17 @@ export const AttendanceSalaryReport: React.FC<AttendanceSalaryReportProps> = ({
 
       // Salary Structure
       const basicSalary = member.salaryStructure?.basic || 15000;
-      const allowances = (member.salaryStructure?.travelAllowance || 0) + 
-                         (member.salaryStructure?.foodAllowance || 0) + 
-                         (member.salaryStructure?.mobileAllowance || 0);
+      const travelAmt = member.salaryStructure?.travelAllowance || 0;
+      const foodAmt = member.salaryStructure?.foodAllowance || 0;
+      const mobileAmt = member.salaryStructure?.mobileAllowance || 0;
+      const houseRentAmt = member.salaryStructure?.houseRentAllowance || 0;
+      const medicalAmt = member.salaryStructure?.medicalAllowance || 0;
+      const specialAmt = member.salaryStructure?.specialAllowance || 0;
+      const otherAmt = member.salaryStructure?.otherAllowance || 0;
+      const fixedBonusAmt = member.salaryStructure?.fixedBonus || 0;
+      const dailyAllowAmt = (member.salaryStructure?.dailyAllowance || 0) * totalWorkedDays;
+
+      const allowances = travelAmt + foodAmt + mobileAmt + houseRentAmt + medicalAmt + specialAmt + otherAmt + fixedBonusAmt + dailyAllowAmt;
       const grossSalary = basicSalary + allowances;
 
       // Daily Rate = Gross Salary / Total Days in Period

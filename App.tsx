@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { auth, db } from './services/firebase';
 import { collection, doc, setDoc, onSnapshot, getDoc, getDocs, query, where, orderBy, limit, writeBatch, deleteDoc } from 'firebase/firestore';
 import { sanitizeDocumentData } from './services/imageCompressor';
@@ -32,7 +32,7 @@ interface FirestoreErrorInfo {
   }
 }
 
-import { Product, Customer, Sale, Collection, Activity, Expense, ProductCategory, Staff, Supplier, RankConfig, AppRole, ProductReturn, Purchase, Attendance, LeaveRequest, Payroll, AdvanceLoan, CustomerLoan, CustomerLoanRepayment, ExpenseReimbursement, WishlistItem, AppNotification, CartItem, ShopSettings, SupplierPayment, SupplierReturn, StockEntry, ProductionBatch, CompanyLoan } from './types';
+import { Product, Customer, Sale, Collection, Activity, Expense, ProductCategory, Staff, Supplier, RankConfig, AppRole, ProductReturn, Purchase, Attendance, LeaveRequest, Payroll, AdvanceLoan, CustomerLoan, CustomerLoanRepayment, ExpenseReimbursement, WishlistItem, AppNotification, CartItem, ShopSettings, SupplierPayment, SupplierReturn, StockEntry, ProductionBatch, CompanyLoan, CompanyBranch, WalletTransaction } from './types';
 import Layout from './components/Layout';
 import Auth from './components/Auth';
 import Dashboard from './components/Dashboard';
@@ -49,6 +49,7 @@ import Returns from './components/Returns';
 import Employees from './components/Employees';
 import PayrollModule from './components/Payroll';
 import { CompanyLoans } from './components/loans/CompanyLoans';
+import { CompanyManagement } from './components/CompanyManagement';
 
 import { EcommerceLayout, ShopHome, CustomerAuth, CartDrawer, CheckoutModal, CustomerProfile, ProductDetailModal, OrderDetailModal } from './components/ecommerce';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -67,7 +68,20 @@ const App: React.FC = () => {
   const [activeStaff, setActiveStaff] = useState<Staff | null>(null);
   const [activeCustomer, setActiveCustomer] = useState<Customer | null>(null);
   const [isAdminSession, setIsAdminSession] = useState(false);
-  const [viewMode, setViewMode] = useState<'admin' | 'shop'>('shop');
+  const [viewMode, setViewMode] = useState<'admin' | 'shop'>(() => {
+    if (typeof window !== 'undefined') {
+      try {
+        const p = new URLSearchParams(window.location.search);
+        const mode = p.get('mode');
+        const tab = p.get('tab');
+        const action = p.get('action');
+        if (mode === 'admin' || mode === 'register_company' || tab === 'register_company' || action === 'new_company') {
+          return 'admin';
+        }
+      } catch (e) {}
+    }
+    return 'shop';
+  });
   const [loading, setLoading] = useState(true);
   const [loadingTimeout, setLoadingTimeout] = useState(false);
   const [firebaseError, setFirebaseError] = useState<string | null>(null);
@@ -135,13 +149,14 @@ const App: React.FC = () => {
   const [activities, setActivities] = useState<Activity[]>([]);
   const [returns, setReturns] = useState<ProductReturn[]>([]);
   const [supplierReturns, setSupplierReturns] = useState<SupplierReturn[]>([]);
+  const [walletTransactions, setWalletTransactions] = useState<WalletTransaction[]>([]);
   
   // E-commerce State
   const [cart, setCart] = useState<CartItem[]>([]);
   const [isCartOpen, setIsCartOpen] = useState(false);
   const [isCheckoutOpen, setIsCheckoutOpen] = useState(false);
   const [isProfileOpen, setIsProfileOpen] = useState(false);
-  const [profileTab, setProfileTab] = useState<'overview' | 'orders' | 'wishlist' | 'notifications' | 'settings'>('overview');
+  const [profileTab, setProfileTab] = useState<'overview' | 'orders' | 'wallet' | 'wishlist' | 'notifications' | 'settings' | 'lucky'>('overview');
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
   const [selectedOrder, setSelectedOrder] = useState<Sale | null>(null);
   const [stockEntries, setStockEntries] = useState<StockEntry[]>([]);
@@ -158,10 +173,23 @@ const App: React.FC = () => {
   const [companyLoans, setCompanyLoans] = useState<CompanyLoan[]>([]);
   const [reimbursements, setReimbursements] = useState<ExpenseReimbursement[]>([]);
   
+  // Multi-Company / Branch State
+  const [companies, setCompanies] = useState<CompanyBranch[]>([]);
+  const [activeCompanyId, setActiveCompanyId] = useState<string>(() => {
+    try {
+      return localStorage.getItem('active_company_id') || 'company-main';
+    } catch (e) {
+      return 'company-main';
+    }
+  });
+
   const [activePage, setActivePage] = useState('dashboard');
 
   const listenersRef = useRef<(() => void)[]>([]);
   const ownerEmail = "smsagor6980@gmail.com";
+  const isMasterOwner = useMemo(() => {
+    return (user?.email || '').toLowerCase().trim() === ownerEmail.toLowerCase().trim();
+  }, [user]);
 
   const ensureArray = (val: any): any[] => {
     if (!val) return [];
@@ -175,6 +203,44 @@ const App: React.FC = () => {
       });
     } catch (e) { return []; }
   };
+
+  const DEFAULT_MAIN_COMPANY: CompanyBranch = {
+    id: 'company-main',
+    name: 'REST BAZER (প্রধান শাখা)',
+    code: 'HQ-01',
+    phone: '017XXXXXXXX',
+    email: 'info@restbazer.com',
+    address: 'Savar, Dhaka, Bangladesh',
+    currency: '৳',
+    headerTitle: 'REST BAZER',
+    headerSubtitle: 'স্মার্ট ইনভেন্টরি ও সেলস ম্যানেজমেন্ট',
+    headerBgColor: '#1e1e5f',
+    headerTextColor: '#ffffff',
+    headerSubtitleColor: '#fcd34d',
+    tagline: 'স্মার্ট ইনভেন্টরি ও সেলস ম্যানেজমেন্ট',
+    invoicePrefix: 'INV-HQ-',
+    status: 'active',
+    isDefault: true,
+    createdAt: '2025-01-01T00:00:00.000Z'
+  };
+
+  const formatCompaniesList = useCallback((val: any): CompanyBranch[] => {
+    const arr = ensureArray(val) as CompanyBranch[];
+    if (!arr || arr.length === 0) {
+      return [DEFAULT_MAIN_COMPANY];
+    }
+
+    const hasMain = arr.some(c => c.id === 'company-main');
+    const hasDefault = arr.some(c => c.isDefault);
+
+    let result = [...arr];
+    if (!hasMain) {
+      result = [{ ...DEFAULT_MAIN_COMPANY, isDefault: !hasDefault }, ...result];
+    } else if (!hasDefault) {
+      result = result.map(c => c.id === 'company-main' ? { ...c, isDefault: true } : c);
+    }
+    return result;
+  }, []);
 
   const generateId = (prefix: string = '') => {
     return `${prefix}${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
@@ -299,14 +365,64 @@ const App: React.FC = () => {
     };
   }, []);
 
+  // Detect and activate company from URL parameter (e.g. ?company=... or ?branch=... or ?code=... or ?mode=admin|shop)
+  useEffect(() => {
+    try {
+      const params = new URLSearchParams(window.location.search);
+      const companyParam = params.get('company') || params.get('branch') || params.get('code') || params.get('comp');
+      const modeParam = params.get('mode');
+
+      if (modeParam === 'admin') {
+        setViewMode('admin');
+      } else if (modeParam === 'shop') {
+        setViewMode('shop');
+      }
+
+      if (companyParam) {
+        if (companies.length > 0) {
+          const matched = companies.find(c => 
+            c.id === companyParam || 
+            (c.code && c.code.toLowerCase() === companyParam.toLowerCase()) ||
+            (c.name && c.name.toLowerCase().trim() === companyParam.toLowerCase().trim())
+          );
+          if (matched && matched.id !== activeCompanyId) {
+            setActiveCompanyId(matched.id);
+            try {
+              localStorage.setItem('active_company_id', matched.id);
+            } catch (e) {}
+          }
+        } else {
+          setActiveCompanyId(companyParam);
+          try {
+            localStorage.setItem('active_company_id', companyParam);
+          } catch (e) {}
+        }
+      }
+    } catch (e) {
+      console.warn("Error parsing URL params:", e);
+    }
+  }, [companies]);
+
   // Consolidate activeStaff and permissions logic
   useEffect(() => {
     if (user) {
-      const isOwner = user.email === ownerEmail;
-      const emailLower = user.email.toLowerCase();
+      const emailLower = (user.email || '').toLowerCase().trim();
+      const isOwner = emailLower === ownerEmail.toLowerCase().trim();
       
-      const currentStaffData = staff.find(s => s.id === user.uid || (s.email && s.email.toLowerCase() === emailLower));
-      const currentCustomerData = customers.find(c => c.uid === user.uid || (c.email && c.email.toLowerCase() === emailLower));
+      const currentStaffData = staff.find(s => s.id === user.uid || (s.email && s.email.toLowerCase().trim() === emailLower));
+      const currentCustomerData = customers.find(c => c.uid === user.uid || (c.email && c.email.toLowerCase().trim() === emailLower));
+
+      // Match company if this user is designated as admin or owner of a company
+      const matchedCompany = companies.find(c => 
+        (c.adminEmail && c.adminEmail.toLowerCase().trim() === emailLower) || 
+        (c.email && c.email.toLowerCase().trim() === emailLower) ||
+        (currentStaffData?.companyId && c.id === currentStaffData.companyId)
+      );
+
+      const isCompanyAdmin = !!companies.find(c => 
+        (c.adminEmail && c.adminEmail.toLowerCase().trim() === emailLower) || 
+        (c.email && c.email.toLowerCase().trim() === emailLower)
+      );
 
       if (isOwner) {
         setIsAdminSession(true);
@@ -320,27 +436,70 @@ const App: React.FC = () => {
               id: user.uid,
               uid: user.uid,
               name: 'Owner',
-              email: user.email,
+              email: user.email || '',
               phone: '',
               designation: 'Owner',
+              roleId: 'owner',
               status: 'active',
               isApproved: true,
               joinedDate: new Date().toISOString()
             };
           });
         }
-      } else if (currentStaffData) {
-        setActiveStaff(currentStaffData);
-        const isPrivileged = ['Admin', 'Owner', 'Manager'].includes(currentStaffData.designation);
-        setIsAdminSession(isPrivileged);
+      } else if (isCompanyAdmin || currentStaffData) {
+        const staffDesignation = (currentStaffData?.designation || (isCompanyAdmin ? 'Admin' : 'Salesman')).trim().toLowerCase();
+        const isPrivileged = isCompanyAdmin || ['admin', 'owner', 'manager', 'super admin', 'director', 'branch manager', 'company admin', 'executive', 'মালিক', 'এডমিন', 'ম্যানেজার'].includes(staffDesignation) || currentStaffData?.roleId === 'admin' || currentStaffData?.roleId === 'owner';
         
-        if (!currentStaffData.isApproved) {
-          setPermissionError("আপনার একাউন্টটি এখনো অনুমোদিত হয়নি। এডমিনের অনুমোদনের জন্য অপেক্ষা করুন।");
-        } else {
+        setIsAdminSession(isPrivileged);
+
+        if (isCompanyAdmin && !currentStaffData) {
+          const comp = matchedCompany || companies.find(c => (c.adminEmail && c.adminEmail.toLowerCase().trim() === emailLower) || (c.email && c.email.toLowerCase().trim() === emailLower));
+          const companyAdminStaff: Staff = {
+            id: user.uid,
+            uid: user.uid,
+            name: comp?.adminName || comp?.name || user.displayName || 'Company Admin',
+            email: user.email || '',
+            phone: comp?.adminPhone || comp?.phone || '',
+            designation: 'Admin',
+            roleId: 'admin',
+            companyId: comp?.id,
+            companyName: comp?.name,
+            status: 'active',
+            isApproved: true,
+            joinedDate: new Date().toISOString()
+          };
+          setActiveStaff(companyAdminStaff);
           setPermissionError(null);
+
+          if (comp) {
+            setActiveCompanyId(comp.id);
+            try {
+              localStorage.setItem('active_company_id', comp.id);
+            } catch (e) {}
+          }
+        } else if (currentStaffData) {
+          const effectiveStaff: Staff = {
+            ...currentStaffData,
+            isApproved: isCompanyAdmin ? true : currentStaffData.isApproved,
+            designation: isCompanyAdmin ? (currentStaffData.designation || 'Admin') : currentStaffData.designation
+          };
+          setActiveStaff(effectiveStaff);
+
+          if (isCompanyAdmin || currentStaffData.isApproved) {
+            setPermissionError(null);
+          } else {
+            setPermissionError("আপনার একাউন্টটি এখনো অনুমোদিত হয়নি। এডমিনের অনুমোদনের জন্য অপেক্ষা করুন।");
+          }
+
+          if (effectiveStaff.companyId) {
+            setActiveCompanyId(effectiveStaff.companyId);
+            try {
+              localStorage.setItem('active_company_id', effectiveStaff.companyId);
+            } catch (e) {}
+          }
         }
       } else {
-        // Not a staff member
+        // Not a staff or admin member
         setIsAdminSession(false);
         setActiveStaff(null);
       }
@@ -351,7 +510,7 @@ const App: React.FC = () => {
         setActiveCustomer(null);
       }
     }
-  }, [staff, customers, user]);
+  }, [staff, customers, user, companies, activeCompanyId]);
 
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -388,6 +547,10 @@ const App: React.FC = () => {
             { path: 'categories', setter: setCategories },
             { path: 'ranks', setter: (v: any) => setRankConfigs(ensureArray(v).length > 0 ? v : DEFAULT_RANKS) },
             { path: 'settings', setter: (v: any) => v && setShopSettings(v) },
+            { 
+              path: 'companies', 
+              setter: (v: any) => setCompanies(formatCompaniesList(v)) 
+            },
           ];
 
           publicSchema.forEach(({ path, setter }) => {
@@ -407,22 +570,26 @@ const App: React.FC = () => {
           });
 
           if (currentUser) {
-            const email = (currentUser.email || '').toLowerCase();
+            const email = (currentUser.email || '').toLowerCase().trim();
             setUser({ email, uid: currentUser.uid });
-            const isOwner = email === ownerEmail;
+            const isOwner = email === ownerEmail.toLowerCase().trim();
             if (isOwner) setIsAdminSession(true);
 
-            // 2. Load staff list (Attempt - might fail for non-staff, handle silently)
+            // Subscribe to all staff list for organization
             const staffUnsubscribe = onSnapshot(collection(db, 'staff'), (snap) => {
               const data = snap.docs.map(doc => ({ ...doc.data(), id: doc.id }));
               setStaff(data as Staff[]);
             }, (err) => {
-              console.warn("Staff list sync limited or restricted.");
+              console.warn("Staff list sync error:", err.message);
             });
             listenersRef.current.push(staffUnsubscribe);
 
-            if (isOwner) {
-              setViewMode('admin');
+            // Helper to subscribe to all administrative collections
+            let adminSubscribed = false;
+            const subscribeAdminCollections = () => {
+              if (adminSubscribed) return;
+              adminSubscribed = true;
+
               const adminCollections = [
                 { path: 'roles', setter: setRoles },
                 { path: 'customers', setter: setCustomers },
@@ -443,6 +610,10 @@ const App: React.FC = () => {
                 { path: 'reimbursements', setter: setReimbursements },
                 { path: 'stock_entries', setter: setStockEntries },
                 { path: 'production_batches', setter: setProductionBatches },
+                { path: 'supplier_returns', setter: setSupplierReturns },
+                { path: 'companies', setter: (v: any) => setCompanies(formatCompaniesList(v)) },
+                { path: 'staff', setter: setStaff },
+                { path: 'wallet_transactions', setter: (v: any) => setWalletTransactions(ensureArray(v).sort((a: any, b: any) => (b.createdAt || '').localeCompare(a.createdAt || ''))) },
               ];
 
               adminCollections.forEach(({ path, setter }) => {
@@ -453,10 +624,16 @@ const App: React.FC = () => {
                 });
                 listenersRef.current.push(unsubscribe);
               });
+            };
+
+            if (isOwner) {
+              setViewMode('admin');
+              setIsAdminSession(true);
+              setPermissionError(null);
+              subscribeAdminCollections();
               setLoading(false);
             } else {
-              // Limited view for customers (standard non-blocking path)
-              setViewMode('shop');
+              // Customer listener
               const customerUnsubscribe = onSnapshot(doc(db, 'customers', currentUser.uid), (snap) => {
                 const data = snap.data() as Customer;
                 if (data) {
@@ -476,14 +653,64 @@ const App: React.FC = () => {
               });
               listenersRef.current.push(salesUnsubscribe);
 
+              const walletQuery = query(collection(db, 'wallet_transactions'), where('customerId', '==', currentUser.uid));
+              const walletUnsubscribe = onSnapshot(walletQuery, (snapshot) => {
+                setWalletTransactions(ensureArray(snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id }))).sort((a: any, b: any) => (b.createdAt || '').localeCompare(a.createdAt || '')));
+              }, (err) => {
+                console.warn("Customer wallet restricted:", err.message);
+              });
+              listenersRef.current.push(walletUnsubscribe);
+
+              // Check if user is a Company Admin in companies collection
+              try {
+                const compSnap = await getDocs(collection(db, 'companies'));
+                const compDocs = compSnap.docs.map(d => ({ ...d.data(), id: d.id } as CompanyBranch));
+                const matchedComp = compDocs.find(c => 
+                  (c.adminEmail && c.adminEmail.toLowerCase().trim() === email) || 
+                  (c.email && c.email.toLowerCase().trim() === email)
+                );
+
+                if (matchedComp) {
+                  setIsAdminSession(true);
+                  setViewMode('admin');
+                  setPermissionError(null);
+                  subscribeAdminCollections();
+
+                  const compAdminStaff: Staff = {
+                    id: currentUser.uid,
+                    uid: currentUser.uid,
+                    name: matchedComp.adminName || matchedComp.name || 'Company Admin',
+                    email: currentUser.email || email,
+                    phone: matchedComp.adminPhone || matchedComp.phone || '',
+                    designation: 'Admin',
+                    roleId: 'admin',
+                    companyId: matchedComp.id,
+                    companyName: matchedComp.name,
+                    status: 'active',
+                    isApproved: true,
+                    joinedDate: new Date().toISOString()
+                  };
+                  setActiveStaff(compAdminStaff);
+                  setStaff(prev => prev.some(s => s.id === compAdminStaff.id) ? prev : [...prev, compAdminStaff]);
+                  
+                  // Ensure staff document in Firestore is saved
+                  setDoc(doc(db, 'staff', currentUser.uid), compAdminStaff, { merge: true }).catch(() => {});
+
+                  setActiveCompanyId(matchedComp.id);
+                  try {
+                    localStorage.setItem('active_company_id', matchedComp.id);
+                  } catch (e) {}
+                }
+              } catch (compErr) {
+                console.warn("Error checking company admin status:", compErr);
+              }
+
               // Real-time listener for the current user's specific staff record
-              let adminSubscribed = false;
               const staffSelfUnsubscribe = onSnapshot(doc(db, 'staff', currentUser.uid), async (snap) => {
                 try {
                   if (snap.exists()) {
                     const foundStaff = snap.data() as Staff;
                     
-                    // Set the staff state so the consolidation and components work correctly
                     setStaff(prev => {
                       if (prev.some(s => s.id === foundStaff.id)) {
                         return prev.map(s => s.id === foundStaff.id ? foundStaff : s);
@@ -493,51 +720,24 @@ const App: React.FC = () => {
 
                     if (foundStaff.isApproved) {
                       setActiveStaff(foundStaff);
-                      const isPrivileged = ['Admin', 'Owner', 'Manager'].includes(foundStaff.designation);
+                      const isPrivileged = ['admin', 'owner', 'manager', 'super admin', 'director', 'branch manager', 'company admin', 'executive', 'মালিক', 'এডমিন', 'ম্যানেজার'].includes((foundStaff.designation || '').trim().toLowerCase()) || foundStaff.roleId === 'admin' || foundStaff.roleId === 'owner';
                       setIsAdminSession(isPrivileged);
                       setViewMode('admin');
                       setPermissionError(null);
+                      subscribeAdminCollections();
 
-                      // Subscribe to administrative collections if not already done
-                      if (!adminSubscribed) {
-                        adminSubscribed = true;
-                        const adminCollections = [
-                          { path: 'roles', setter: setRoles },
-                          { path: 'customers', setter: setCustomers },
-                          { path: 'suppliers', setter: setSupplierList },
-                          { path: 'supplier_payments', setter: setSupplierPayments },
-                          { path: 'sales', setter: (v: any) => setSales(ensureArray(v).sort((a: any, b: any) => (b.id || '').localeCompare(a.id || ''))) },
-                          { path: 'purchases', setter: (v: any) => setPurchases(ensureArray(v).sort((a: any, b: any) => (b.id || '').localeCompare(a.id || ''))) },
-                          { path: 'collections', setter: setCollections },
-                          { path: 'expenses', setter: setExpenses },
-                          { path: 'activities', setter: (v: any) => setActivities(ensureArray(v).slice(0, 100)) },
-                          { path: 'returns', setter: setReturns },
-                          { path: 'attendances', setter: setAttendances },
-                          { path: 'leaves', setter: setLeaves },
-                          { path: 'payrolls', setter: setPayrolls },
-                          { path: 'loans', setter: setLoans },
-                          { path: 'customer_loans', setter: setCustomerLoans },
-                          { path: 'company_loans', setter: setCompanyLoans },
-                          { path: 'reimbursements', setter: setReimbursements },
-                          { path: 'stock_entries', setter: setStockEntries },
-                          { path: 'supplier_returns', setter: setSupplierReturns },
-                        ];
-
-                        adminCollections.forEach(({ path, setter }) => {
-                          const unsubscribe = onSnapshot(collection(db, path), (snapshot) => {
-                            setter(ensureArray(snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id }))));
-                          }, (err) => {
-                            console.warn(`Admin data error for ${path}:`, err.message);
-                          });
-                          listenersRef.current.push(unsubscribe);
-                        });
+                      if (foundStaff.companyId) {
+                        setActiveCompanyId(foundStaff.companyId);
+                        try {
+                          localStorage.setItem('active_company_id', foundStaff.companyId);
+                        } catch (e) {}
                       }
                     } else {
                       // Check if there's another document under a different ID (e.g. STAFF-xxxx) that is approved
                       let mergedApproved = false;
                       if (currentUser.email) {
                         try {
-                          const emailLower = currentUser.email.toLowerCase();
+                          const emailLower = currentUser.email.toLowerCase().trim();
                           const q = query(collection(db, 'staff'), where('email', '==', emailLower));
                           const querySnap = await getDocs(q);
                           const approvedDoc = querySnap.docs.find(d => d.id !== currentUser.uid && d.data().isApproved);
@@ -553,25 +753,26 @@ const App: React.FC = () => {
                             await setDoc(doc(db, 'staff', currentUser.uid), linkedStaff);
                             try {
                               await deleteDoc(doc(db, 'staff', approvedDoc.id));
-                            } catch (delErr) {
-                              console.warn("Could not delete old approved doc:", delErr);
-                            }
+                            } catch (delErr) {}
                             mergedApproved = true;
+                            setActiveStaff(linkedStaff);
+                            setIsAdminSession(true);
+                            setViewMode('admin');
+                            setPermissionError(null);
+                            subscribeAdminCollections();
                           }
-                        } catch (err) {
-                          console.warn("Error looking up alternative approved staff record:", err);
-                        }
+                        } catch (err) {}
                       }
                       
-                      if (!mergedApproved) {
+                      if (!mergedApproved && !isAdminSession) {
                         setPermissionError("আপনার একাউন্টটি এখনো অনুমোদিত হয়নি। এডমিনের অনুমোদনের জন্য অপেক্ষা করুন।");
                       }
                     }
                   } else {
-                    // Fallback: If not found by UID directly, search by email to find any pre-configured record
+                    // Fallback: If not found by UID directly, search by email
                     if (currentUser.email) {
                       try {
-                        const emailLower = currentUser.email.toLowerCase();
+                        const emailLower = currentUser.email.toLowerCase().trim();
                         const q = query(collection(db, 'staff'), where('email', '==', emailLower));
                         const querySnap = await getDocs(q);
                         if (!querySnap.empty) {
@@ -585,20 +786,21 @@ const App: React.FC = () => {
                               isApproved: staffData.isApproved,
                               status: staffData.status
                             };
-                            // Link user to the correct pre-created staff doc path
                             await setDoc(doc(db, 'staff', currentUser.uid), linkedStaff);
-                            
-                            // Clean up the duplicate pre-created STAFF-... document
                             try {
                               await deleteDoc(doc(db, 'staff', matchedDoc.id));
-                            } catch (delErr) {
-                              console.warn("Could not delete old staff document:", delErr);
+                            } catch (delErr) {}
+                            if (linkedStaff.isApproved) {
+                              setActiveStaff(linkedStaff);
+                              const isPrivileged = ['admin', 'owner', 'manager', 'super admin', 'director', 'branch manager', 'company admin', 'executive', 'মালিক', 'এডমিন', 'ম্যানেজার'].includes((linkedStaff.designation || '').trim().toLowerCase()) || linkedStaff.roleId === 'admin' || linkedStaff.roleId === 'owner';
+                              setIsAdminSession(isPrivileged);
+                              setViewMode('admin');
+                              setPermissionError(null);
+                              subscribeAdminCollections();
                             }
                           }
                         }
-                      } catch (qErr) {
-                        console.warn("Searching staff by email failed:", qErr);
-                      }
+                      } catch (qErr) {}
                     }
                   }
                 } catch (snapErr) {
@@ -635,9 +837,21 @@ const App: React.FC = () => {
   }, []);
 
   const handleUpdate = async (type: string, data: any) => {
+    // Automatically attach the current active companyId to objects if not already present
+    let processedData = data;
+    const compId = effectiveCompanyId;
+
+    if (compId && type !== 'settings' && type !== 'roles' && type !== 'ranks' && type !== 'companies') {
+      if (Array.isArray(data)) {
+        processedData = data.map(item => (typeof item === 'object' && item !== null && !item.companyId) ? { ...item, companyId: compId } : item);
+      } else if (typeof data === 'object' && data !== null && !data.companyId) {
+        processedData = { ...data, companyId: compId };
+      }
+    }
+
     // Optimistic Update for better UX
     if (type === 'products') {
-      const items = Array.isArray(data) ? data : [data];
+      const items = Array.isArray(processedData) ? processedData : [processedData];
       setProducts(prev => {
         const next = [...prev];
         items.forEach(item => {
@@ -648,7 +862,7 @@ const App: React.FC = () => {
         return next;
       });
     } else if (type === 'categories') {
-      const items = Array.isArray(data) ? data : [data];
+      const items = Array.isArray(processedData) ? processedData : [processedData];
       setCategories(prev => {
         const next = [...prev];
         items.forEach(item => {
@@ -659,7 +873,7 @@ const App: React.FC = () => {
         return next;
       });
     } else if (type === 'attendances') {
-      const items = Array.isArray(data) ? data : [data];
+      const items = Array.isArray(processedData) ? processedData : [processedData];
       setAttendances(prev => {
         const next = [...prev];
         items.forEach(item => {
@@ -670,7 +884,7 @@ const App: React.FC = () => {
         return next;
       });
     } else if (type === 'leaves') {
-      const items = Array.isArray(data) ? data : [data];
+      const items = Array.isArray(processedData) ? processedData : [processedData];
       setLeaves(prev => {
         const next = [...prev];
         items.forEach(item => {
@@ -681,7 +895,7 @@ const App: React.FC = () => {
         return next;
       });
     } else if (type === 'customers') {
-      const items = Array.isArray(data) ? data : [data];
+      const items = Array.isArray(processedData) ? processedData : [processedData];
       setCustomers(prev => {
         const next = [...prev];
         items.forEach(item => {
@@ -697,7 +911,7 @@ const App: React.FC = () => {
         setActiveCustomer(prev => prev ? { ...prev, ...updatedActive } : null);
       }
     } else if (type === 'staff') {
-      const items = Array.isArray(data) ? data : [data];
+      const items = Array.isArray(processedData) ? processedData : [processedData];
       setStaff(prev => {
         const next = [...prev];
         items.forEach(item => {
@@ -708,7 +922,7 @@ const App: React.FC = () => {
         return next;
       });
     } else if (type === 'sales') {
-      const items = Array.isArray(data) ? data : [data];
+      const items = Array.isArray(processedData) ? processedData : [processedData];
       setSales(prev => {
         const next = [...prev];
         items.forEach(item => {
@@ -719,7 +933,7 @@ const App: React.FC = () => {
         return next;
       });
     } else if (type === 'purchases') {
-      const items = Array.isArray(data) ? data : [data];
+      const items = Array.isArray(processedData) ? processedData : [processedData];
       setPurchases(prev => {
         const next = [...prev];
         items.forEach(item => {
@@ -730,7 +944,7 @@ const App: React.FC = () => {
         return next;
       });
     } else if (type === 'suppliers') {
-      const items = Array.isArray(data) ? data : [data];
+      const items = Array.isArray(processedData) ? processedData : [processedData];
       setSupplierList(prev => {
         const next = [...prev];
         items.forEach(item => {
@@ -741,7 +955,7 @@ const App: React.FC = () => {
         return next;
       });
     } else if (type === 'payrolls') {
-      const items = Array.isArray(data) ? data : [data];
+      const items = Array.isArray(processedData) ? processedData : [processedData];
       setPayrolls(prev => {
         const next = [...prev];
         items.forEach(item => {
@@ -752,7 +966,7 @@ const App: React.FC = () => {
         return next;
       });
     } else if (type === 'loans') {
-      const items = Array.isArray(data) ? data : [data];
+      const items = Array.isArray(processedData) ? processedData : [processedData];
       setLoans(prev => {
         const next = [...prev];
         items.forEach(item => {
@@ -763,7 +977,7 @@ const App: React.FC = () => {
         return next;
       });
     } else if (type === 'customer_loans') {
-      const items = Array.isArray(data) ? data : [data];
+      const items = Array.isArray(processedData) ? processedData : [processedData];
       setCustomerLoans(prev => {
         const next = [...prev];
         items.forEach(item => {
@@ -774,7 +988,7 @@ const App: React.FC = () => {
         return next;
       });
     } else if (type === 'reimbursements') {
-      const items = Array.isArray(data) ? data : [data];
+      const items = Array.isArray(processedData) ? processedData : [processedData];
       setReimbursements(prev => {
         const next = [...prev];
         items.forEach(item => {
@@ -785,7 +999,7 @@ const App: React.FC = () => {
         return next;
       });
     } else if (type === 'roles') {
-      const items = Array.isArray(data) ? data : [data];
+      const items = Array.isArray(processedData) ? processedData : [processedData];
       setRoles(prev => {
         const next = [...prev];
         items.forEach(item => {
@@ -796,7 +1010,7 @@ const App: React.FC = () => {
         return next;
       });
     } else if (type === 'ranks') {
-      const items = Array.isArray(data) ? data : [data];
+      const items = Array.isArray(processedData) ? processedData : [processedData];
       setRankConfigs(prev => {
         const next = [...prev];
         items.forEach(item => {
@@ -806,10 +1020,21 @@ const App: React.FC = () => {
         });
         return next;
       });
+    } else if (type === 'companies') {
+      const items = Array.isArray(processedData) ? processedData : [processedData];
+      setCompanies(prev => {
+        const next = [...prev];
+        items.forEach(item => {
+          const idx = next.findIndex(c => c.id === item.id);
+          if (idx >= 0) next[idx] = { ...next[idx], ...item };
+          else next.push({ ...item });
+        });
+        return next;
+      });
     }
 
     try {
-      await updateFirebase(type, data);
+      await updateFirebase(type, processedData);
     } catch (err: any) {
       console.error(`Update failed for ${type}:`, err);
       // If it's a permission error, updateFirebase/handleFirestoreError already handles it by showing the error screen
@@ -848,6 +1073,8 @@ const App: React.FC = () => {
       setActivities(prev => prev.filter(a => a.id !== id));
     } else if (type === 'production_batches') {
       setProductionBatches(prev => prev.filter(b => b.id !== id));
+    } else if (type === 'companies') {
+      setCompanies(prev => prev.filter(c => c.id !== id));
     }
     deleteFirebase(type, id);
   };
@@ -893,7 +1120,8 @@ const App: React.FC = () => {
       ...newSale, 
       status: saleStatus, 
       soldBy: activeStaff?.name || 'Unknown',
-      soldById: activeStaff?.id
+      soldById: activeStaff?.id,
+      companyId: newSale.companyId || effectiveCompanyId
     };
 
     const newActivity: Activity = {
@@ -991,7 +1219,12 @@ const App: React.FC = () => {
       addedBy: activeStaff?.id
     };
     
-    setPurchases(prev => [newPurchase, ...prev]);
+    const purchaseWithCompany: Purchase = {
+      ...newPurchase,
+      companyId: newPurchase.companyId || effectiveCompanyId
+    };
+
+    setPurchases(prev => [purchaseWithCompany, ...prev]);
     setSupplierList(updatedSuppliers);
     setProducts(updatedProducts);
     setActivities(prev => [newActivity, ...prev].slice(0, 100));
@@ -1005,14 +1238,15 @@ const App: React.FC = () => {
         method: 'Initial Payment',
         date: newPurchase.date,
         note: `Purchase #${newPurchase.purchaseNo}`,
-        addedBy: activeStaff?.id
-      };
+        addedBy: activeStaff?.id,
+        companyId: (newPurchase as any).companyId || effectiveCompanyId
+      } as any;
       setSupplierPayments(prev => [newPayment, ...prev]);
       updateFirebase('supplier_payments', newPayment);
     }
 
     // Surgical updates
-    updateFirebase('purchases', newPurchase);
+    updateFirebase('purchases', purchaseWithCompany);
     updateFirebase('activities', newActivity);
     
     const changedSupplier = updatedSuppliers.find(s => s.id === newPurchase.supplierId);
@@ -1025,7 +1259,7 @@ const App: React.FC = () => {
   };
 
   const handleReturn = (ret: ProductReturn) => {
-    const returnWithAuthor = { ...ret, addedBy: activeStaff?.id };
+    const returnWithAuthor = { ...ret, addedBy: activeStaff?.id, companyId: (ret as any).companyId || effectiveCompanyId };
     setReturns(prev => [returnWithAuthor, ...prev]);
     updateFirebase('returns', returnWithAuthor);
 
@@ -1043,14 +1277,15 @@ const App: React.FC = () => {
       description: `${ret.quantity}টি পণ্য ফেরত এসেছে।`,
       amount: ret.amount,
       date: ret.date,
-      addedBy: activeStaff?.id
-    };
+      addedBy: activeStaff?.id,
+      companyId: effectiveCompanyId
+    } as any;
     setActivities(prev => [newActivity, ...prev].slice(0, 100));
     updateFirebase('activities', newActivity);
   };
 
   const handleSupplierReturn = (ret: SupplierReturn, updatedSuppliers: Supplier[], updatedProducts: Product[]) => {
-    const returnWithAuthor = { ...ret, addedBy: activeStaff?.id };
+    const returnWithAuthor = { ...ret, addedBy: activeStaff?.id, companyId: (ret as any).companyId || effectiveCompanyId };
     setSupplierReturns(prev => [returnWithAuthor, ...prev]);
     setSupplierList(updatedSuppliers);
     setProducts(updatedProducts);
@@ -1070,8 +1305,9 @@ const App: React.FC = () => {
       description: `${ret.quantity}টি পণ্য সাপ্লায়ারের নিকট ফেরত দেওয়া হয়েছে। পরিমাণ: ৳${ret.totalAmount}`,
       amount: ret.totalAmount,
       date: ret.date,
-      addedBy: activeStaff?.id
-    };
+      addedBy: activeStaff?.id,
+      companyId: effectiveCompanyId
+    } as any;
     setActivities(prev => [newActivity, ...prev].slice(0, 100));
     updateFirebase('activities', newActivity);
   };
@@ -1151,6 +1387,158 @@ const App: React.FC = () => {
     }
   };
 
+  // Multi-Company / Branch Filtering & Management
+  const activeCompany = useMemo(() => {
+    if (activeCompanyId === 'all') return null;
+    return companies.find(c => c.id === activeCompanyId) || null;
+  }, [companies, activeCompanyId]);
+
+  const effectiveCompanyId = useMemo(() => {
+    if (activeCompanyId && activeCompanyId !== 'all') return activeCompanyId;
+    const defaultComp = companies.find(c => c.isDefault) || companies.find(c => c.id === 'company-main') || companies[0];
+    if (defaultComp) return defaultComp.id;
+    return 'company-main';
+  }, [activeCompanyId, companies]);
+
+  const isItemInActiveCompany = useCallback((itemCompanyId?: string) => {
+    // 1. Master Owner / Admin can select 'all' to see aggregated data across all companies
+    if (activeCompanyId === 'all') return true;
+    
+    // 2. Identify the main / default company
+    const defaultComp = companies.find(c => c.isDefault) || companies.find(c => c.id === 'company-main') || companies[0];
+    const isViewingMainCompany = activeCompanyId === 'company-main' || 
+                                (defaultComp && activeCompanyId === defaultComp.id) || 
+                                !activeCompanyId;
+
+    // 3. If an item has an explicit companyId:
+    if (itemCompanyId) {
+      if (itemCompanyId === activeCompanyId) return true;
+      // If it belongs to 'company-main' or default company and active view is the main/default company:
+      if (isViewingMainCompany && (itemCompanyId === 'company-main' || itemCompanyId === defaultComp?.id)) {
+        return true;
+      }
+      return false;
+    }
+
+    // 4. If an item has NO companyId (all legacy unassigned data created before multi-branch):
+    // It belongs to the Main App (REST BAZER প্রধান শাখা).
+    // It is visible when viewing the Main Company, or when only 1 company exists.
+    return isViewingMainCompany;
+  }, [activeCompanyId, companies]);
+
+  // Dynamic filtered lists strictly isolated according to active branch/company
+  const activeProducts = useMemo(() => products.filter(p => isItemInActiveCompany(p.companyId)), [products, isItemInActiveCompany]);
+  const activeCategories = useMemo(() => categories.filter(c => isItemInActiveCompany((c as any).companyId)), [categories, isItemInActiveCompany]);
+  const activeSales = useMemo(() => sales.filter(s => isItemInActiveCompany(s.companyId)), [sales, isItemInActiveCompany]);
+  const activePurchases = useMemo(() => purchases.filter(p => isItemInActiveCompany(p.companyId)), [purchases, isItemInActiveCompany]);
+  const activeCustomers = useMemo(() => customers.filter(c => isItemInActiveCompany(c.companyId)), [customers, isItemInActiveCompany]);
+  const activeSuppliers = useMemo(() => suppliers.filter(s => isItemInActiveCompany(s.companyId)), [suppliers, isItemInActiveCompany]);
+  const activeSupplierPayments = useMemo(() => supplierPayments.filter(p => isItemInActiveCompany((p as any).companyId)), [supplierPayments, isItemInActiveCompany]);
+  const activeExpenses = useMemo(() => expenses.filter(e => isItemInActiveCompany(e.companyId)), [expenses, isItemInActiveCompany]);
+  const activeCollections = useMemo(() => collections.filter(c => isItemInActiveCompany((c as any).companyId)), [collections, isItemInActiveCompany]);
+  const activeReturns = useMemo(() => returns.filter(r => isItemInActiveCompany((r as any).companyId)), [returns, isItemInActiveCompany]);
+  const activeSupplierReturns = useMemo(() => supplierReturns.filter(r => isItemInActiveCompany((r as any).companyId)), [supplierReturns, isItemInActiveCompany]);
+  const activePayrolls = useMemo(() => payrolls.filter(p => isItemInActiveCompany(p.companyId)), [payrolls, isItemInActiveCompany]);
+  const activeStaffList = useMemo(() => staff.filter(s => isItemInActiveCompany(s.companyId)), [staff, isItemInActiveCompany]);
+  const activeLoans = useMemo(() => loans.filter(l => isItemInActiveCompany((l as any).companyId)), [loans, isItemInActiveCompany]);
+  const activeCustomerLoans = useMemo(() => customerLoans.filter(l => isItemInActiveCompany((l as any).companyId)), [customerLoans, isItemInActiveCompany]);
+  const activeCompanyLoans = useMemo(() => companyLoans.filter(l => isItemInActiveCompany(l.companyId)), [companyLoans, isItemInActiveCompany]);
+  const activeReimbursements = useMemo(() => reimbursements.filter(r => isItemInActiveCompany((r as any).companyId)), [reimbursements, isItemInActiveCompany]);
+  const activeStockEntries = useMemo(() => stockEntries.filter(s => isItemInActiveCompany((s as any).companyId)), [stockEntries, isItemInActiveCompany]);
+  const activeProductionBatches = useMemo(() => productionBatches.filter(b => isItemInActiveCompany((b as any).companyId)), [productionBatches, isItemInActiveCompany]);
+  const activeAttendances = useMemo(() => attendances.filter(a => isItemInActiveCompany((a as any).companyId)), [attendances, isItemInActiveCompany]);
+  const activeLeaves = useMemo(() => leaves.filter(l => isItemInActiveCompany((l as any).companyId)), [leaves, isItemInActiveCompany]);
+  const activeActivities = useMemo(() => activities.filter(a => isItemInActiveCompany((a as any).companyId)), [activities, isItemInActiveCompany]);
+
+  const effectiveShopSettings = useMemo(() => {
+    if (activeCompany) {
+      return {
+        ...shopSettings,
+        name: activeCompany.name || shopSettings.name,
+        phone: activeCompany.phone || shopSettings.phone,
+        email: activeCompany.email || shopSettings.email,
+        address: activeCompany.address || shopSettings.address,
+        currency: activeCompany.currency || shopSettings.currency,
+        logoUrl: activeCompany.logoUrl || shopSettings.logoUrl,
+        headerTitle: activeCompany.headerTitle || activeCompany.name || shopSettings.headerTitle,
+        headerSubtitle: activeCompany.headerSubtitle || activeCompany.tagline || shopSettings.headerSubtitle,
+        headerBgColor: activeCompany.headerBgColor || shopSettings.headerBgColor,
+        headerTextColor: activeCompany.headerTextColor || shopSettings.headerTextColor,
+        headerSubtitleColor: activeCompany.headerSubtitleColor || shopSettings.headerSubtitleColor,
+      };
+    }
+    return shopSettings;
+  }, [shopSettings, activeCompany]);
+
+  const handleSelectCompany = (companyId: string) => {
+    // Non-admin / non-master users cannot switch between companies; they are confined to their own company
+    if (!isMasterOwner && !isAdminSession && activeStaff?.companyId && companyId !== activeStaff.companyId) {
+      return;
+    }
+    setActiveCompanyId(companyId);
+    try {
+      localStorage.setItem('active_company_id', companyId);
+    } catch (e) {}
+  };
+
+  const handleSaveCompany = async (company: CompanyBranch) => {
+    if (!isMasterOwner && !isAdminSession) {
+      alert("কোম্পানি যুক্ত বা এডিট করার অনুমতি শুধুমাত্র অ্যাডমিন ও প্রধান সিস্টেম ওনারের রয়েছে।");
+      return;
+    }
+    const existing = companies.find(c => c.id === company.id);
+    let updatedList: CompanyBranch[];
+    if (company.isDefault) {
+      updatedList = companies.map(c => ({
+        ...c,
+        isDefault: c.id === company.id
+      }));
+      if (!existing) updatedList.push(company);
+      else updatedList = updatedList.map(c => c.id === company.id ? company : c);
+    } else {
+      if (existing) {
+        updatedList = companies.map(c => c.id === company.id ? company : c);
+      } else {
+        updatedList = [...companies, company];
+      }
+    }
+    setCompanies(updatedList);
+    await updateFirebase('companies', company, company.id);
+    if (company.isDefault) {
+      for (const c of updatedList) {
+        if (c.id !== company.id && c.isDefault) {
+          await updateFirebase('companies', { ...c, isDefault: false }, c.id);
+        }
+      }
+    }
+  };
+
+  const handleDeleteCompany = async (companyId: string) => {
+    if (!isMasterOwner && !isAdminSession) {
+      alert("কোম্পানি ডিলিট করার অনুমতি শুধুমাত্র অ্যাডমিন ও প্রধান সিস্টেম ওনারের রয়েছে।");
+      return;
+    }
+    const updated = companies.filter(c => c.id !== companyId);
+    setCompanies(updated);
+    if (activeCompanyId === companyId) {
+      const nextActive = updated[0]?.id || 'company-main';
+      handleSelectCompany(nextActive);
+    }
+    await deleteFirebase('companies', companyId);
+  };
+
+  const handleSetDefaultCompany = async (companyId: string) => {
+    if (!isMasterOwner && !isAdminSession) return;
+    const updated = companies.map(c => ({
+      ...c,
+      isDefault: c.id === companyId
+    }));
+    setCompanies(updated);
+    for (const c of updated) {
+      await updateFirebase('companies', { ...c, isDefault: c.id === companyId }, c.id);
+    }
+  };
+
   // E-commerce Handlers
   const handleAddToCart = (product: Product) => {
     setCart(prev => {
@@ -1212,6 +1600,7 @@ const App: React.FC = () => {
     if (!db) return;
     
     const invoiceNo = `INV-${Date.now().toString().slice(-6)}`;
+    const isWallet = !!orderData.isWalletPayment;
     const newSale: Sale = {
       id: Date.now().toString(),
       invoiceNo,
@@ -1223,22 +1612,87 @@ const App: React.FC = () => {
       discount: 0,
       vat: 0,
       total: orderData.total,
-      paid: 0,
-      due: orderData.total,
-      tendered: 0,
+      paid: isWallet ? orderData.total : 0,
+      due: isWallet ? 0 : orderData.total,
+      tendered: isWallet ? orderData.total : 0,
       change: 0,
-      paymentMethod: orderData.paymentMethod,
+      paymentMethod: orderData.paymentMethod || 'cash_on_delivery',
+      paymentGatewayId: orderData.paymentGatewayId,
+      paymentGatewayName: orderData.paymentGatewayName,
+      senderNumber: orderData.senderNumber,
+      trxId: orderData.trxId,
       notes: orderData.notes,
-      status: 'pending',
+      status: isWallet ? 'approved' : 'pending',
       soldBy: 'Online Customer',
       customerName: orderData.name,
       customerPhone: orderData.phone,
-      customerAddress: orderData.address
+      customerAddress: orderData.address,
+      companyId: effectiveCompanyId
     };
 
     const updatedSales = [newSale, ...sales];
     setSales(updatedSales);
     await updateFirebase('sales', newSale, newSale.id);
+
+    // Handle Rest Pay Wallet deduction and cashback
+    if (isWallet && activeCustomer) {
+      const oldBal = activeCustomer.walletBalance || 0;
+      const deduction = orderData.walletDeductionAmount || orderData.total;
+      const newBal = Math.max(0, oldBal - deduction);
+      const cashback = orderData.estimatedCashback || 0;
+      const finalBal = newBal + cashback;
+
+      const updatedCust: Customer = {
+        ...activeCustomer,
+        walletBalance: finalBal,
+        totalWalletSpent: (activeCustomer.totalWalletSpent || 0) + deduction
+      };
+      setActiveCustomer(updatedCust);
+      setCustomers(prev => prev.map(c => c.id === updatedCust.id ? updatedCust : c));
+      await updateFirebase('customers', updatedCust, updatedCust.id);
+
+      // Record wallet transaction for purchase
+      const purchaseTx: WalletTransaction = {
+        id: `tx_${Date.now()}_purchase`,
+        customerId: activeCustomer.id,
+        customerName: activeCustomer.name,
+        customerPhone: activeCustomer.phone,
+        type: 'purchase',
+        amount: deduction,
+        status: 'approved',
+        gatewayId: 'rest_pay',
+        gatewayName: 'Rest Pay Wallet',
+        referenceId: newSale.id,
+        note: `অর্ডার পেমেন্ট #${invoiceNo}`,
+        balanceBefore: oldBal,
+        balanceAfter: newBal,
+        createdAt: new Date().toISOString()
+      };
+      setWalletTransactions(prev => [purchaseTx, ...prev]);
+      await updateFirebase('wallet_transactions', purchaseTx, purchaseTx.id);
+
+      // Record cashback if applicable
+      if (cashback > 0) {
+        const cashbackTx: WalletTransaction = {
+          id: `tx_${Date.now()}_cashback`,
+          customerId: activeCustomer.id,
+          customerName: activeCustomer.name,
+          customerPhone: activeCustomer.phone,
+          type: 'cashback',
+          amount: cashback,
+          status: 'approved',
+          gatewayId: 'rest_pay',
+          gatewayName: 'Rest Pay Cashback',
+          referenceId: newSale.id,
+          note: `অর্ডার #${invoiceNo} থেকে ক্যাশব্যাক`,
+          balanceBefore: newBal,
+          balanceAfter: finalBal,
+          createdAt: new Date().toISOString()
+        };
+        setWalletTransactions(prev => [cashbackTx, ...prev]);
+        await updateFirebase('wallet_transactions', cashbackTx, cashbackTx.id);
+      }
+    }
 
     // Update product stock - only for items in cart
     const itemsToUpdate = (cart.map(item => {
@@ -1263,7 +1717,7 @@ const App: React.FC = () => {
       id: Date.now().toString(),
       type: 'sale',
       title: `অনলাইন অর্ডার: #${invoiceNo}`,
-      description: `${orderData.name} এর কাছ থেকে ${cart.length}টি পণ্যের অর্ডার।`,
+      description: `${orderData.name} এর কাছ থেকে ${cart.length}টি পণ্যের অর্ডার (${orderData.paymentGatewayName || orderData.paymentMethod})।`,
       amount: orderData.total,
       date: new Date().toISOString()
     };
@@ -1272,6 +1726,69 @@ const App: React.FC = () => {
     await updateFirebase('activities', newActivity, newActivity.id);
 
     setCart([]);
+  };
+
+  const handleTopupRequest = async (txData: Omit<WalletTransaction, 'id' | 'createdAt'>) => {
+    const newTx: WalletTransaction = {
+      ...txData,
+      id: `tx_${Date.now()}_topup`,
+      createdAt: new Date().toISOString()
+    };
+    setWalletTransactions(prev => [newTx, ...prev]);
+    await updateFirebase('wallet_transactions', newTx, newTx.id);
+
+    // Notify activity log for Admin
+    const topupActivity: Activity = {
+      id: Date.now().toString(),
+      type: 'collection',
+      title: `ওয়ালেট রিচার্জ অনুরোধ: ৳${txData.amount}`,
+      description: `${txData.customerName} (${txData.customerPhone}) ${txData.gatewayName || ''} দিয়ে ৳${txData.amount} রিচার্জের অনুরোধ পাঠিয়েছেন। TrxID: ${txData.trxId || 'N/A'}`,
+      amount: txData.amount,
+      date: new Date().toISOString()
+    };
+    setActivities(prev => [topupActivity, ...prev].slice(0, 100));
+    await updateFirebase('activities', topupActivity, topupActivity.id);
+  };
+
+  const handleProfileWalletTx = async (
+    txData: Omit<WalletTransaction, 'id' | 'createdAt'>, 
+    updatedEntity: Customer | Staff | Supplier
+  ) => {
+    const newTx: WalletTransaction = {
+      ...txData,
+      id: `wtx_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`,
+      createdAt: new Date().toISOString()
+    };
+
+    setWalletTransactions(prev => [newTx, ...prev]);
+    await updateFirebase('wallet_transactions', newTx, newTx.id);
+
+    // Update entity state and Firebase collection
+    if (txData.profileType === 'customer' || (!txData.profileType && 'membershipRank' in updatedEntity)) {
+      const cust = updatedEntity as Customer;
+      setCustomers(prev => prev.map(c => c.id === cust.id ? cust : c));
+      await updateFirebase('customers', cust, cust.id);
+    } else if (txData.profileType === 'staff' || ('designation' in updatedEntity)) {
+      const stf = updatedEntity as Staff;
+      setStaff(prev => prev.map(s => s.id === stf.id ? stf : s));
+      await updateFirebase('staff', stf, stf.id);
+    } else if (txData.profileType === 'supplier' || ('companyName' in updatedEntity)) {
+      const supp = updatedEntity as Supplier;
+      setSupplierList(prev => prev.map(s => s.id === supp.id ? supp : s));
+      await updateFirebase('suppliers', supp, supp.id);
+    }
+
+    // Log Activity
+    const newActivity: Activity = {
+      id: Date.now().toString(),
+      type: 'collection',
+      title: `ওয়ালেট লেনদেন: ৳${txData.amount} (${txData.profileType === 'staff' ? 'স্টাফ' : txData.profileType === 'supplier' ? 'সাপ্লায়ার' : 'কাস্টমার'})`,
+      description: `${txData.profileName || 'ইউজার'} (${txData.profilePhone || ''}) - ${txData.note || 'ওয়ালেট ব্যালেন্স পরিবর্তন'}। বর্তমান ব্যালেন্স: ৳${txData.balanceAfter}`,
+      amount: txData.amount,
+      date: new Date().toISOString()
+    };
+    setActivities(prev => [newActivity, ...prev].slice(0, 100));
+    await updateFirebase('activities', newActivity, newActivity.id);
   };
 
   const handleConfirmOrder = (order: Sale) => {
@@ -1329,7 +1846,17 @@ const App: React.FC = () => {
   // 4. Admin Login View
   const isPrivileged = isAdminSession || !!activeStaff;
   if (viewMode === 'admin' && (!user || !isPrivileged)) {
-    return <Auth isOnline={isOnline} onSetAdminMode={setIsAdminSession} onStaffLogin={setActiveStaff} onSwitchToShop={() => setViewMode('shop')} />;
+    return (
+      <Auth 
+        isOnline={isOnline} 
+        onSetAdminMode={setIsAdminSession} 
+        onStaffLogin={setActiveStaff} 
+        onSwitchToShop={() => setViewMode('shop')} 
+        companies={companies}
+        activeCompanyId={activeCompanyId}
+        onSelectCompany={handleSelectCompany}
+      />
+    );
   }
 
   if (viewMode === 'shop') {
@@ -1364,9 +1891,9 @@ const App: React.FC = () => {
         isCustomer={!!activeCustomer}
         isAdmin={isAdminSession || !!activeStaff}
         onSwitchToAdmin={(isAdminSession || !!activeStaff || !activeCustomer) ? () => setViewMode('admin') : undefined}
-        shopSettings={shopSettings}
+        shopSettings={effectiveShopSettings}
       >
-        {shopSettings?.shopStatus === 'closed' && !isAdminSession && !activeStaff && (
+        {effectiveShopSettings?.shopStatus === 'closed' && !isAdminSession && !activeStaff && (
           <div className="fixed inset-0 z-[100] bg-slate-900/90 backdrop-blur-xl flex items-center justify-center p-6 text-center">
             <div className="max-w-md">
               <div className="w-24 h-24 bg-rose-500/20 text-rose-500 rounded-full flex items-center justify-center mx-auto mb-8 animate-pulse">
@@ -1378,7 +1905,7 @@ const App: React.FC = () => {
               </p>
               <div className="p-6 bg-white/5 rounded-3xl border border-white/10">
                 <p className="text-xs font-black text-white/40 uppercase tracking-[4px] mb-2">যোগাযোগ</p>
-                <p className="text-white font-bold">{shopSettings?.phone || 'আমাদের সাথে যোগাযোগ করুন'}</p>
+                <p className="text-white font-bold">{effectiveShopSettings?.phone || 'আমাদের সাথে যোগাযোগ করুন'}</p>
               </div>
             </div>
           </div>
@@ -1394,12 +1921,13 @@ const App: React.FC = () => {
               updateFirebase('customers', c, c.id);
             }} 
             onBack={() => { setIsCheckoutOpen(false); setIsProfileOpen(false); }} 
+            shopSettings={effectiveShopSettings}
           />
         ) : (
           <>
             <ShopHome 
-              products={products}
-              categories={categories}
+              products={activeProducts}
+              categories={activeCategories}
               onAddToCart={handleAddToCart}
               onAddToWishlist={handleAddToWishlist}
               onViewDetails={setSelectedProduct}
@@ -1408,7 +1936,7 @@ const App: React.FC = () => {
               onUpdateCartQuantity={handleUpdateCartQuantity}
               shopPage={shopPage}
               externalSearchQuery={shopSearchQuery}
-              shopSettings={shopSettings}
+              shopSettings={effectiveShopSettings}
             />
 
             <CartDrawer 
@@ -1433,6 +1961,7 @@ const App: React.FC = () => {
               items={cart}
               customer={activeCustomer}
               onPlaceOrder={handlePlaceOrder}
+              shopSettings={effectiveShopSettings}
             />
 
             <ProductDetailModal 
@@ -1451,9 +1980,9 @@ const App: React.FC = () => {
               {selectedOrder && (
                 <OrderDetailModal
                   order={selectedOrder}
-                  products={products}
+                  products={activeProducts}
                   onClose={() => setSelectedOrder(null)}
-                  shopSettings={shopSettings}
+                  shopSettings={effectiveShopSettings}
                 />
               )}
             </AnimatePresence>
@@ -1461,12 +1990,13 @@ const App: React.FC = () => {
             {isProfileOpen && activeCustomer && (
               <CustomerProfile 
                 customer={activeCustomer}
-                orders={sales.filter(s => s.customerId === activeCustomer.id)}
+                orders={activeSales.filter(s => s.customerId === activeCustomer.id)}
                 wishlist={activeCustomer.wishlist || []}
                 notifications={activeCustomer.notifications || []}
-                products={products}
+                products={activeProducts}
                 rankConfigs={rankConfigs}
-                shopSettings={shopSettings}
+                shopSettings={effectiveShopSettings}
+                walletTransactions={walletTransactions}
                 initialTab={profileTab}
                 onLogout={() => { auth?.signOut(); setActiveCustomer(null); setIsProfileOpen(false); }}
                 onClose={() => setIsProfileOpen(false)}
@@ -1477,6 +2007,7 @@ const App: React.FC = () => {
                 onRemoveFromWishlist={handleAddToWishlist}
                 onAddToCart={handleAddToCart}
                 onUpdateCustomer={(data) => handleUpdate('customers', data)}
+                onTopupRequest={handleTopupRequest}
               />
             )}
           </>
@@ -1507,36 +2038,40 @@ const App: React.FC = () => {
       onLogout={() => auth?.signOut()} 
       userEmail={user?.email || ''} 
       isAdmin={isAdminSession}
-      userRoleName={activeStaff?.designation || 'Salesman'}
+      userRoleName={activeStaff?.designation || (user?.email === ownerEmail ? 'Owner' : (isAdminSession ? 'Admin' : 'Salesman'))}
       roles={roles}
       onSwitchToShop={() => setViewMode('shop')}
-      products={products}
-      shopSettings={shopSettings}
+      products={activeProducts}
+      shopSettings={effectiveShopSettings}
       onUpdateShopSettings={handleUpdateShopSettings}
+      companies={companies}
+      activeCompanyId={activeCompanyId}
+      onSelectCompany={handleSelectCompany}
     >
       <div className="relative">
         {!isOnline && <div className="fixed top-20 left-1/2 -translate-x-1/2 z-[100] bg-rose-500 text-white px-6 py-2 rounded-full text-[10px] font-black uppercase tracking-widest border border-rose-400 shadow-xl">অফলাইন মোড</div>}
         {isSyncing && <div className="fixed top-20 right-8 z-[100] bg-white shadow-2xl rounded-full p-3 animate-spin border-2 border-primary/20"><RefreshCw size={20} className="text-primary" /></div>}
         
-        {activePage === 'dashboard' && <Dashboard sales={sales} collections={collections} activities={activities} products={products} expenses={expenses} customers={customers} setActivePage={setActivePage} isAdmin={isAdminSession} currentStaff={activeStaff} />}
-        {activePage === 'sales' && <Sales products={products} customers={customers} sales={sales} onSaleComplete={handleSaleComplete} onAddReturn={handleReturn} onSplitDelivery={handleProcessSplitDelivery} staff={activeStaff ? [activeStaff] : []} isAdmin={isAdminSession} currentStaff={activeStaff} shopSettings={shopSettings} />}
-        {activePage === 'approvals' && <OrderApprovals sales={sales} products={products} customers={customers} onUpdateSales={(data) => handleUpdate('sales', data)} onDeleteSale={(id) => handleDelete('sales', id)} onUpdateProducts={(data) => handleUpdate('products', data)} onUpdateCustomers={(data) => handleUpdate('customers', data)} onSplitDelivery={handleProcessSplitDelivery} isAdmin={isAdminSession} currentStaff={activeStaff} shopSettings={shopSettings} />}
+        {activePage === 'dashboard' && <Dashboard sales={activeSales} collections={activeCollections} activities={activeActivities} products={activeProducts} expenses={activeExpenses} customers={activeCustomers} setActivePage={setActivePage} isAdmin={isAdminSession} currentStaff={activeStaff} />}
+        {activePage === 'sales' && <Sales products={activeProducts} customers={activeCustomers} sales={activeSales} onSaleComplete={handleSaleComplete} onAddReturn={handleReturn} onSplitDelivery={handleProcessSplitDelivery} staff={activeStaff ? [activeStaff] : []} isAdmin={isAdminSession} currentStaff={activeStaff} shopSettings={effectiveShopSettings} />}
+        {activePage === 'approvals' && <OrderApprovals sales={activeSales} products={activeProducts} customers={activeCustomers} onUpdateSales={(data) => handleUpdate('sales', data)} onDeleteSale={(id) => handleDelete('sales', id)} onUpdateProducts={(data) => handleUpdate('products', data)} onUpdateCustomers={(data) => handleUpdate('customers', data)} onSplitDelivery={handleProcessSplitDelivery} isAdmin={isAdminSession} currentStaff={activeStaff} shopSettings={effectiveShopSettings} />}
         {activePage === 'products' && <Products 
-          products={products} 
-          purchases={purchases} 
-          suppliers={suppliers}
-          productionBatches={productionBatches}
+          products={activeProducts} 
+          purchases={activePurchases} 
+          suppliers={activeSuppliers}
+          productionBatches={activeProductionBatches}
           onProductionBatchComplete={handleProductionBatchComplete}
           onDeleteProductionBatch={(id) => handleDelete('production_batches', id)}
           onUpdate={(data) => handleUpdate('products', data)} 
           onDelete={(id) => handleDelete('products', id)} 
-          categories={categories} 
+          categories={activeCategories} 
           onCategoryUpdate={(data) => handleUpdate('categories', data)} 
-          stockEntries={stockEntries} 
+          stockEntries={activeStockEntries} 
           onStockUpdate={(entry, updatedProducts) => {
-            setStockEntries(prev => [entry, ...prev]);
+            const entryWithComp = { ...entry, companyId: (entry as any).companyId || effectiveCompanyId };
+            setStockEntries(prev => [entryWithComp, ...prev]);
             setProducts(updatedProducts);
-            updateFirebase('stock_entries', entry);
+            updateFirebase('stock_entries', entryWithComp);
             // Only sync the single product that changed in Firebase to avoid syncing other unchanged products
             const changedProduct = updatedProducts.find(p => {
               const original = products.find(o => o.id === p.id);
@@ -1548,24 +2083,40 @@ const App: React.FC = () => {
           }} 
           currentStaff={activeStaff} 
         />}
-        {activePage === 'customers' && <Customers customers={customers} onUpdate={(data) => handleUpdate('customers', data)} onDelete={(id) => handleDelete('customers', id)} sales={sales} collections={collections} shopSettings={shopSettings} onCollection={(col, cust) => {
-          const colWithAuthor = { ...col, addedBy: activeStaff?.id };
-          setCollections(prev => [colWithAuthor, ...prev]); 
-          setCustomers(prev => prev.map(c => c.id === cust.id ? cust : c));
-          updateFirebase('collections', colWithAuthor); 
-          updateFirebase('customers', cust);
-        }} rankConfigs={rankConfigs} customerLoans={customerLoans} onUpdateCustomerLoans={(data) => handleUpdate('customer_loans', data)} onDeleteCustomerLoan={(id) => handleDelete('customer_loans', id)} isAdmin={isAdminSession} currentStaff={activeStaff} />}
+        {activePage === 'customers' && <Customers 
+          customers={activeCustomers} 
+          onUpdate={(data) => handleUpdate('customers', data)} 
+          onDelete={(id) => handleDelete('customers', id)} 
+          sales={activeSales} 
+          collections={activeCollections} 
+          shopSettings={effectiveShopSettings} 
+          onCollection={(col, cust) => {
+            const colWithAuthor = { ...col, addedBy: activeStaff?.id, companyId: (col as any).companyId || effectiveCompanyId };
+            setCollections(prev => [colWithAuthor, ...prev]); 
+            setCustomers(prev => prev.map(c => c.id === cust.id ? cust : c));
+            updateFirebase('collections', colWithAuthor); 
+            updateFirebase('customers', cust);
+          }} 
+          rankConfigs={rankConfigs} 
+          customerLoans={activeCustomerLoans} 
+          onUpdateCustomerLoans={(data) => handleUpdate('customer_loans', data)} 
+          onDeleteCustomerLoan={(id) => handleDelete('customer_loans', id)} 
+          isAdmin={isAdminSession} 
+          currentStaff={activeStaff}
+          walletTransactions={walletTransactions}
+          onWalletTransaction={handleProfileWalletTx}
+        />}
         {activePage === 'suppliers' && <Suppliers 
-          suppliers={suppliers} 
-          products={products} 
-          purchases={purchases} 
-          payments={supplierPayments} 
-          returns={supplierReturns}
+          suppliers={activeSuppliers} 
+          products={activeProducts} 
+          purchases={activePurchases} 
+          payments={activeSupplierPayments} 
+          returns={activeSupplierReturns}
           onUpdate={(data) => handleUpdate('suppliers', data)} 
           onDelete={(id) => handleDelete('suppliers', id)}
           onPurchaseComplete={handlePurchaseComplete} 
           onPayment={(pay, updatedSuppliers) => {
-            const payWithAuthor = { ...pay, addedBy: activeStaff?.id };
+            const payWithAuthor = { ...pay, addedBy: activeStaff?.id, companyId: (pay as any).companyId || effectiveCompanyId };
             setSupplierPayments(prev => [payWithAuthor, ...prev]);
             setSupplierList(updatedSuppliers);
             updateFirebase('supplier_payments', payWithAuthor);
@@ -1573,48 +2124,52 @@ const App: React.FC = () => {
             if (changedSupplier) updateFirebase('suppliers', changedSupplier);
           }} 
           onSupplierReturn={handleSupplierReturn}
-          categories={categories} 
+          categories={activeCategories} 
           isAdmin={isAdminSession}
           currentStaff={activeStaff}
-          shopSettings={shopSettings}
+          shopSettings={effectiveShopSettings}
+          walletTransactions={walletTransactions}
+          onWalletTransaction={handleProfileWalletTx}
         />}
-        {activePage === 'returns' && <Returns returns={returns} sales={sales} products={products} onAddReturn={handleReturn} />}
+        {activePage === 'returns' && <Returns returns={activeReturns} sales={activeSales} products={activeProducts} onAddReturn={handleReturn} />}
         {activePage === 'employees' && <Employees 
-          staff={staff} 
+          staff={activeStaffList} 
           onUpdateStaff={(data) => handleUpdate('staff', data)} 
           onDeleteStaff={(id) => handleDelete('staff', id)} 
-          attendances={attendances} 
+          attendances={activeAttendances} 
           onUpdateAttendances={(data) => handleUpdate('attendances', data)} 
-          leaves={leaves} 
+          leaves={activeLeaves} 
           onUpdateLeaves={(data) => handleUpdate('leaves', data)} 
-          sales={sales} 
+          sales={activeSales} 
           currentStaff={activeStaff} 
           isAdmin={isAdminSession} 
-          payrolls={payrolls}
+          payrolls={activePayrolls}
           onUpdatePayrolls={(data) => handleUpdate('payrolls', data)}
           onAddExpense={(exp) => {
-            const expWithAuthor = { ...exp, addedBy: activeStaff?.id };
+            const expWithAuthor = { ...exp, addedBy: activeStaff?.id, companyId: exp.companyId || effectiveCompanyId };
             setExpenses(prev => [expWithAuthor, ...prev]); 
             updateFirebase('expenses', expWithAuthor);
           }}
-          shopSettings={shopSettings}
+          shopSettings={effectiveShopSettings}
+          walletTransactions={walletTransactions}
+          onWalletTransaction={handleProfileWalletTx}
         />}
         {activePage === 'payroll' && <PayrollModule 
-          staff={staff} 
-          customers={customers}
-          payrolls={payrolls} 
+          staff={activeStaffList} 
+          customers={activeCustomers}
+          payrolls={activePayrolls} 
           onUpdatePayrolls={(data) => handleUpdate('payrolls', data)} 
-          loans={loans} 
+          loans={activeLoans} 
           onUpdateLoans={(data) => handleUpdate('loans', data)} 
-          customerLoans={customerLoans}
+          customerLoans={activeCustomerLoans}
           onUpdateCustomerLoans={(data) => handleUpdate('customer_loans', data)}
-          reimbursements={reimbursements} 
+          reimbursements={activeReimbursements} 
           onUpdateReimbursements={(data) => handleUpdate('reimbursements', data)} 
-          attendances={attendances}
-          leaves={leaves}
-          shopSettings={shopSettings}
+          attendances={activeAttendances}
+          leaves={activeLeaves}
+          shopSettings={effectiveShopSettings}
           onAddExpense={(exp) => {
-            const expWithAuthor = { ...exp, addedBy: activeStaff?.id };
+            const expWithAuthor = { ...exp, addedBy: activeStaff?.id, companyId: exp.companyId || effectiveCompanyId };
             setExpenses(prev => [expWithAuthor, ...prev]); 
             updateFirebase('expenses', expWithAuthor);
           }}
@@ -1622,49 +2177,49 @@ const App: React.FC = () => {
           currentStaff={activeStaff} 
         />}
         {activePage === 'company_loans' && <CompanyLoans 
-          companyLoans={companyLoans}
-          onUpdateLoan={(loan) => handleUpdate('company_loans', loan)}
+          companyLoans={activeCompanyLoans}
+          onUpdateLoan={(loan) => handleUpdate('company_loans', { ...loan, companyId: loan.companyId || effectiveCompanyId })}
           onDeleteLoan={(id) => handleDelete('company_loans', id)}
           onAddExpense={(exp) => {
-            const expWithAuthor = { ...exp, id: `exp_${Date.now()}`, addedBy: activeStaff?.id };
+            const expWithAuthor = { ...exp, id: `exp_${Date.now()}`, addedBy: activeStaff?.id, companyId: exp.companyId || effectiveCompanyId };
             setExpenses(prev => [expWithAuthor, ...prev]);
             updateFirebase('expenses', expWithAuthor);
           }}
-          shopSettings={shopSettings}
+          shopSettings={effectiveShopSettings}
           isAdmin={isAdminSession}
           currentStaff={activeStaff}
         />}
-        {activePage === 'due' && <DuePayments customers={customers} sales={sales} collections={collections} onCollection={(col, cust) => {
-          const colWithAuthor = { ...col, addedBy: activeStaff?.id };
+        {activePage === 'due' && <DuePayments customers={activeCustomers} sales={activeSales} collections={activeCollections} onCollection={(col, cust) => {
+          const colWithAuthor = { ...col, addedBy: activeStaff?.id, companyId: (col as any).companyId || effectiveCompanyId };
           setCollections(prev => [colWithAuthor, ...prev]); 
           setCustomers(prev => prev.map(c => c.id === cust.id ? cust : c));
           updateFirebase('collections', colWithAuthor); 
           updateFirebase('customers', cust);
-        }} customerLoans={customerLoans} onUpdateCustomerLoans={(data) => handleUpdate('customer_loans', data)} onDeleteCustomerLoan={(id) => handleDelete('customer_loans', id)} rankConfigs={rankConfigs} isAdmin={isAdminSession} currentStaff={activeStaff} shopSettings={shopSettings} />}
+        }} customerLoans={activeCustomerLoans} onUpdateCustomerLoans={(data) => handleUpdate('customer_loans', data)} onDeleteCustomerLoan={(id) => handleDelete('customer_loans', id)} rankConfigs={rankConfigs} isAdmin={isAdminSession} currentStaff={activeStaff} shopSettings={effectiveShopSettings} />}
         {activePage === 'reports' && <Reports 
-          sales={sales} 
-          products={products} 
-          customers={customers} 
-          collections={collections} 
-          expenses={expenses} 
-          returns={returns} 
-          purchases={purchases}
-          productionBatches={productionBatches}
-          suppliers={suppliers}
+          sales={activeSales} 
+          products={activeProducts} 
+          customers={activeCustomers} 
+          collections={activeCollections} 
+          expenses={activeExpenses} 
+          returns={activeReturns} 
+          purchases={activePurchases}
+          productionBatches={activeProductionBatches}
+          suppliers={activeSuppliers}
           currentUser={activeStaff} 
           isAdmin={isAdminSession} 
-          allStaff={staff} 
+          allStaff={activeStaffList} 
           onCollection={() => {}} 
           onUpdateSales={(data) => handleUpdate('sales', data)} 
           onDeleteSale={(id) => handleDelete('sales', id)} 
           onSplitDelivery={handleProcessSplitDelivery}
-          stockEntries={stockEntries} 
-          shopSettings={shopSettings} 
+          stockEntries={activeStockEntries} 
+          shopSettings={effectiveShopSettings} 
         />}
         {activePage === 'expenses' && <Expenses 
-          expenses={expenses} 
+          expenses={activeExpenses} 
           onAddExpense={(exp) => {
-            const expWithAuthor = { ...exp, addedBy: activeStaff?.id, addedByName: activeStaff?.name };
+            const expWithAuthor = { ...exp, addedBy: activeStaff?.id, addedByName: activeStaff?.name, companyId: exp.companyId || effectiveCompanyId };
             setExpenses(prev => [expWithAuthor, ...prev]); 
             updateFirebase('expenses', expWithAuthor);
           }} 
@@ -1675,10 +2230,66 @@ const App: React.FC = () => {
           onDeleteExpense={(id) => handleDelete('expenses', id)} 
           isAdmin={isAdminSession} 
           currentStaff={activeStaff} 
-          allStaff={staff}
-          shopSettings={shopSettings}
+          allStaff={activeStaffList}
+          shopSettings={effectiveShopSettings}
         />}
-        {activePage === 'settings' && <Settings staff={staff} onUpdateStaff={(data) => handleUpdate('staff', data)} roles={roles} onUpdateRoles={(data) => handleUpdate('roles', data)} categories={categories} rankConfigs={rankConfigs} onUpdateRanks={(data) => handleUpdate('ranks', data)} shopSettings={shopSettings} onUpdateShopSettings={handleUpdateShopSettings} onBackup={handleBackupData} onRestore={handleRestoreData} isAdmin={isAdminSession} />}
+        {activePage === 'companies' && (
+          (isMasterOwner || isAdminSession) ? (
+            <CompanyManagement 
+              companies={companies}
+              activeCompanyId={activeCompanyId}
+              onSelectCompany={handleSelectCompany}
+              onSaveCompany={handleSaveCompany}
+              onDeleteCompany={handleDeleteCompany}
+              onSetDefaultCompany={handleSetDefaultCompany}
+              onSetDefault={handleSetDefaultCompany}
+              products={products}
+              sales={sales}
+              staff={staff}
+              isAdmin={isAdminSession}
+            />
+          ) : (
+            <div className="p-8 text-center bg-white rounded-3xl border border-slate-200 shadow-sm max-w-lg mx-auto mt-12 space-y-4">
+              <div className="w-16 h-16 bg-rose-50 text-rose-500 rounded-2xl flex items-center justify-center mx-auto">
+                <ShieldCheck size={32} />
+              </div>
+              <h3 className="text-lg font-black text-slate-800">অনুমতি নেই</h3>
+              <p className="text-xs text-slate-500 font-bold leading-relaxed">
+                কোম্পানি ও ব্রাঞ্চ কন্ট্রোল করার ক্ষমতা শুধুমাত্র মূল অ্যাপের প্রধান সিস্টেম ওনার এবং এডমিনের রয়েছে।
+              </p>
+              <button 
+                onClick={() => setActivePage('dashboard')} 
+                className="px-6 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-black transition-all shadow-xs"
+              >
+                ড্যাশবোর্ডে ফিরুন
+              </button>
+            </div>
+          )
+        )}
+        {activePage === 'settings' && (
+          <Settings 
+            staff={activeStaffList} 
+            onUpdateStaff={(data) => handleUpdate('staff', data)} 
+            roles={roles} 
+            onUpdateRoles={(data) => handleUpdate('roles', data)} 
+            categories={activeCategories} 
+            rankConfigs={rankConfigs} 
+            onUpdateRanks={(data) => handleUpdate('ranks', data)} 
+            shopSettings={effectiveShopSettings} 
+            onUpdateShopSettings={handleUpdateShopSettings} 
+            customers={customers}
+            onUpdateCustomers={(data) => handleUpdate('customers', data)}
+            walletTransactions={walletTransactions}
+            onUpdateWalletTransactions={(data) => handleUpdate('walletTransactions', data)}
+            companies={companies}
+            onSaveCompany={handleSaveCompany}
+            onDeleteCompany={handleDeleteCompany}
+            onNavigateToCompanies={() => setActivePage('companies')}
+            onBackup={handleBackupData} 
+            onRestore={handleRestoreData} 
+            isAdmin={isAdminSession} 
+          />
+        )}
       </div>
     </Layout>
   );

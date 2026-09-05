@@ -4,9 +4,10 @@ import {
   Banknote, FileText, Download, CheckCircle2, XCircle, 
   AlertCircle, Plus, Edit, Trash2, Check, X, Coins, Wallet,
   User, Users, Phone, MapPin, Sparkles, HandCoins, CreditCard, Clock,
-  Printer, DollarSign, Calendar, Eye, ShieldCheck, History, ArrowUpRight
+  Printer, DollarSign, Calendar, Eye, ShieldCheck, History, ArrowUpRight, Scale
 } from 'lucide-react';
 import { AttendanceSalaryReport } from './AttendanceSalaryReport';
+import { PayrollReasonReport } from './PayrollReasonReport';
 
 interface PayrollProps {
   staff: Staff[];
@@ -45,7 +46,7 @@ const PayrollModule: React.FC<PayrollProps> = ({
   isAdmin, 
   currentStaff 
 }) => {
-  const [activeTab, setActiveTab] = useState<'attendance_salary' | 'salary' | 'loans' | 'expenses'>('attendance_salary');
+  const [activeTab, setActiveTab] = useState<'reason_report' | 'attendance_salary' | 'salary' | 'loans' | 'expenses'>('reason_report');
   const [selectedMonth, setSelectedMonth] = useState(new Date().toISOString().substring(0, 7)); // YYYY-MM
   const [showLoanModal, setShowLoanModal] = useState(false);
   const [showExpenseModal, setShowExpenseModal] = useState(false);
@@ -91,7 +92,18 @@ const PayrollModule: React.FC<PayrollProps> = ({
       if (existing) return existing;
 
       const basic = s.salaryStructure?.basic || 15000;
-      const allowances = (s.salaryStructure?.travelAllowance || 0) + (s.salaryStructure?.foodAllowance || 0) + (s.salaryStructure?.mobileAllowance || 0);
+      const travel = s.salaryStructure?.travelAllowance || 0;
+      const food = s.salaryStructure?.foodAllowance || 0;
+      const mobile = s.salaryStructure?.mobileAllowance || 0;
+      const houseRent = s.salaryStructure?.houseRentAllowance || 0;
+      const medical = s.salaryStructure?.medicalAllowance || 0;
+      const special = s.salaryStructure?.specialAllowance || 0;
+      const otherAllow = s.salaryStructure?.otherAllowance || 0;
+      const fixedBonus = s.salaryStructure?.fixedBonus || 0;
+      const pfDeduction = s.salaryStructure?.providentFundDeduction || 0;
+      const taxDeduction = s.salaryStructure?.taxDeduction || 0;
+
+      const allowances = travel + food + mobile + houseRent + medical + special + otherAllow + fixedBonus;
       const commission = 0;
       const bonus = 0;
       const overtime = 0;
@@ -99,7 +111,7 @@ const PayrollModule: React.FC<PayrollProps> = ({
       // Calculate active loan installments
       const activeLoans = loans.filter(l => l.staffId === s.id && l.status === 'Approved' && l.remainingAmount > 0);
       const loanDeduction = activeLoans.reduce((sum, l) => sum + Math.min(l.installmentAmount || 0, l.remainingAmount), 0);
-      const deductions = loanDeduction;
+      const deductions = loanDeduction + pfDeduction + taxDeduction;
 
       const netSalary = Math.max(0, basic + allowances + commission + bonus + overtime - deductions);
 
@@ -109,6 +121,20 @@ const PayrollModule: React.FC<PayrollProps> = ({
         month: selectedMonth,
         basic,
         allowances,
+        travelAllowance: travel,
+        travelAllowanceReason: s.salaryStructure?.travelAllowanceReason,
+        foodAllowance: food,
+        foodAllowanceReason: s.salaryStructure?.foodAllowanceReason,
+        mobileAllowance: mobile,
+        mobileAllowanceReason: s.salaryStructure?.mobileAllowanceReason,
+        houseRentAllowance: houseRent,
+        houseRentReason: s.salaryStructure?.houseRentReason,
+        medicalAllowance: medical,
+        medicalReason: s.salaryStructure?.medicalReason,
+        specialAllowance: special,
+        specialReason: s.salaryStructure?.specialReason,
+        providentFundDeduction: pfDeduction,
+        taxDeduction: taxDeduction,
         commission,
         bonus,
         overtime,
@@ -372,6 +398,7 @@ const PayrollModule: React.FC<PayrollProps> = ({
         
         <div className="flex bg-white p-2 rounded-[28px] border-2 border-slate-100 shadow-sm w-full md:w-auto overflow-x-auto no-scrollbar gap-1">
           {[
+            { id: 'reason_report', label: 'কারণসহ পূর্ণাঙ্গ রিপোর্ট', icon: Scale },
             { id: 'attendance_salary', label: 'হাজিরাভিত্তিক বেতন ও পে', icon: Banknote },
             { id: 'salary', label: 'পেরোল তালিকা', icon: FileText },
             { id: 'loans', label: 'অগ্রিম ও লোন', icon: Coins },
@@ -380,7 +407,7 @@ const PayrollModule: React.FC<PayrollProps> = ({
             <button 
               key={tab.id}
               onClick={() => setActiveTab(tab.id as any)} 
-              className={`whitespace-nowrap flex items-center gap-2.5 px-5 py-3.5 rounded-2xl text-[11px] font-black uppercase tracking-wider transition-all duration-300 ${activeTab === tab.id ? 'bg-emerald-500 text-white shadow-lg shadow-emerald-500/20' : 'text-slate-500 hover:text-slate-800 hover:bg-slate-50'}`}
+              className={`whitespace-nowrap flex items-center gap-2.5 px-5 py-3.5 rounded-2xl text-[11px] font-black uppercase tracking-wider transition-all duration-300 ${activeTab === tab.id ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-600/20' : 'text-slate-500 hover:text-slate-800 hover:bg-slate-50'}`}
             >
               <tab.icon size={16} />
               {tab.label}
@@ -388,6 +415,22 @@ const PayrollModule: React.FC<PayrollProps> = ({
           ))}
         </div>
       </div>
+
+      {/* TAB 0: REASON-WISE COMPREHENSIVE PAYROLL REPORT (সকল কারণসহ পূর্ণাঙ্গ রিপোর্ট) */}
+      {activeTab === 'reason_report' && (
+        <PayrollReasonReport
+          staff={staff}
+          payrolls={payrolls}
+          onUpdatePayrolls={onUpdatePayrolls}
+          loans={loans}
+          attendances={attendances}
+          leaves={leaves}
+          onAddExpense={onAddExpense}
+          shopSettings={shopSettings}
+          isAdmin={isAdmin}
+          currentStaff={currentStaff}
+        />
+      )}
 
       {/* TAB 1: ATTENDANCE BASED SALARY REPORT (বেতন হিসাব ও পেমেন্ট সিস্টেম) */}
       {activeTab === 'attendance_salary' && (
@@ -400,6 +443,7 @@ const PayrollModule: React.FC<PayrollProps> = ({
           onAddExpense={onAddExpense}
           shopSettings={shopSettings}
           isAdmin={isAdmin}
+          currentStaff={currentStaff}
         />
       )}
 

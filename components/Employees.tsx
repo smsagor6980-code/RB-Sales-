@@ -1,11 +1,13 @@
 import React, { useState, useMemo, useEffect } from 'react';
-import { Staff, Attendance, LeaveRequest, Sale, Payroll, Expense, ShopSettings } from '../types';
+import { Staff, Attendance, LeaveRequest, Sale, Payroll, Expense, ShopSettings, WalletTransaction } from '../types';
 import { 
   Users, Calendar, Clock, Target, CheckCircle2, XCircle, 
   AlertCircle, MapPin, Search, Plus, FileText, Check, X, BarChart3, ShieldCheck,
   Edit, Trash2, Phone, Mail, Award, TrendingUp, Printer, 
   DollarSign, Building2, Briefcase, ChevronRight, Grid, List, Sparkles, UserCheck, Filter,
-  Timer, Flame, Zap, ArrowRight, RotateCcw, Banknote
+  Timer, Flame, Zap, ArrowRight, RotateCcw, Banknote, Coins, Wallet, HandCoins,
+  Car, Utensils, Smartphone, Home, HeartPulse, Gift, Shield, Scale, Layers,
+  ArrowDownLeft, ArrowUpRight, History
 } from 'lucide-react';
 import { AttendanceSalaryReport } from './AttendanceSalaryReport';
 
@@ -24,6 +26,8 @@ interface EmployeesProps {
   onUpdatePayrolls?: (data: Payroll[]) => void;
   onAddExpense?: (expense: Partial<Expense>) => void;
   shopSettings?: ShopSettings | null;
+  walletTransactions?: WalletTransaction[];
+  onWalletTransaction?: (txData: Omit<WalletTransaction, 'id' | 'createdAt'>, updatedStaff: Staff) => void;
 }
 
 export interface WorkDurationResult {
@@ -53,7 +57,9 @@ const Employees: React.FC<EmployeesProps> = ({
   payrolls = [],
   onUpdatePayrolls,
   onAddExpense,
-  shopSettings
+  shopSettings,
+  walletTransactions = [],
+  onWalletTransaction
 }) => {
   const [activeTab, setActiveTab] = useState<'list' | 'attendance' | 'report' | 'leave' | 'performance'>('list');
   const [viewMode, setViewMode] = useState<'grid' | 'table'>('grid');
@@ -77,6 +83,14 @@ const Employees: React.FC<EmployeesProps> = ({
   const [selectedProfileStaff, setSelectedProfileStaff] = useState<Staff | null>(null);
   const [showIdCardModal, setShowIdCardModal] = useState<Staff | null>(null);
   const [showLeaveModal, setShowLeaveModal] = useState(false);
+
+  // Staff Wallet Action Modal State
+  const [showStaffWalletModal, setShowStaffWalletModal] = useState(false);
+  const [staffWalletActionType, setStaffWalletActionType] = useState<'topup' | 'adjustment_deduct' | 'bonus' | 'withdraw'>('topup');
+  const [staffWalletAmount, setStaffWalletAmount] = useState('');
+  const [staffWalletNote, setStaffWalletNote] = useState('');
+  const [staffWalletGateway, setStaffWalletGateway] = useState('cash');
+  const [staffWalletTrxId, setStaffWalletTrxId] = useState('');
 
   // Leave Form
   const [leaveForm, setLeaveForm] = useState<Partial<LeaveRequest>>({
@@ -104,11 +118,30 @@ const Employees: React.FC<EmployeesProps> = ({
     nagadNo: '',
     bankAccountNo: '',
     bankName: '',
+    overtimeRatePerHour: 100,
     salaryStructure: {
       basic: 15000,
+      salaryType: 'monthly',
       travelAllowance: 2000,
+      travelAllowanceReason: 'যাতায়াত ও অফিসিয়াল যাতায়াত খরচ',
       foodAllowance: 2000,
-      mobileAllowance: 1000
+      foodAllowanceReason: 'দৈনিক মধ্যাহ্নভোজ ও নাস্তা বাবদ ভাতা',
+      mobileAllowance: 1000,
+      mobileAllowanceReason: 'মোবাইল ও ইন্টারনেট ডেটা বিল',
+      houseRentAllowance: 0,
+      houseRentReason: 'বাড়ি ভাড়া ভাতা',
+      medicalAllowance: 0,
+      medicalReason: 'চিকিৎসা ভাতা',
+      specialAllowance: 0,
+      specialReason: 'বিশেষ দক্ষতা ও পারফরম্যান্স ভাতা',
+      otherAllowance: 0,
+      otherAllowanceReason: 'অন্যান্য সুবিধা',
+      dailyAllowance: 0,
+      overtimeRatePerHour: 100,
+      fixedBonus: 0,
+      fixedBonusReason: 'ঈদ / উৎসব বোনাস',
+      providentFundDeduction: 0,
+      taxDeduction: 0
     },
     targets: {
       monthly: 100000,
@@ -243,6 +276,75 @@ const Employees: React.FC<EmployeesProps> = ({
     const set = new Set(staff.map(s => s.designation).filter(Boolean));
     return Array.from(set);
   }, [staff]);
+
+  // Selected Profile Staff Wallet Transactions
+  const staffWalletTxs = useMemo(() => {
+    if (!selectedProfileStaff) return [];
+    return walletTransactions.filter(tx => 
+      tx.profileId === selectedProfileStaff.id ||
+      (tx.profileType === 'staff' && tx.profilePhone === selectedProfileStaff.phone) ||
+      (tx.customerId === selectedProfileStaff.id)
+    ).sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
+  }, [walletTransactions, selectedProfileStaff]);
+
+  const handleExecuteStaffWalletAction = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedProfileStaff) return;
+    const numAmount = parseFloat(staffWalletAmount);
+    if (isNaN(numAmount) || numAmount <= 0) return;
+
+    const currentBal = selectedProfileStaff.walletBalance || 0;
+    let newBal = currentBal;
+    let newTotalEarned = selectedProfileStaff.totalWalletEarned || 0;
+    let newTotalWithdrawn = selectedProfileStaff.totalWalletWithdrawn || 0;
+
+    if (staffWalletActionType === 'topup' || staffWalletActionType === 'bonus') {
+      newBal = currentBal + numAmount;
+      newTotalEarned += numAmount;
+    } else {
+      // withdraw or adjustment_deduct
+      newBal = Math.max(0, currentBal - numAmount);
+      newTotalWithdrawn += numAmount;
+    }
+
+    const updatedMember: Staff = {
+      ...selectedProfileStaff,
+      walletBalance: newBal,
+      totalWalletEarned: newTotalEarned,
+      totalWalletWithdrawn: newTotalWithdrawn
+    };
+
+    const newTx: Omit<WalletTransaction, 'id' | 'createdAt'> = {
+      profileType: 'staff',
+      profileId: selectedProfileStaff.id,
+      profileName: selectedProfileStaff.name,
+      profilePhone: selectedProfileStaff.phone,
+      type: staffWalletActionType === 'withdraw' ? 'withdrawal' : staffWalletActionType,
+      amount: numAmount,
+      gatewayId: staffWalletGateway,
+      gatewayName: staffWalletGateway === 'bkash' ? 'বিকাশ' : staffWalletGateway === 'nagad' ? 'নগদ' : staffWalletGateway === 'bank' ? 'ব্যাংক ট্রান্সফার' : 'নগদ ক্যাশ পেআউট',
+      trxId: staffWalletTrxId || undefined,
+      note: staffWalletNote || (staffWalletActionType === 'topup' ? 'বেতন/ভাতা ক্রেডিট' : staffWalletActionType === 'bonus' ? 'পারফর্মেন্স বোনাস' : 'ক্যাশ উত্তোলন/উইথড্র'),
+      balanceBefore: currentBal,
+      balanceAfter: newBal,
+      status: 'approved',
+      approvedBy: currentStaff?.id,
+      approvedByName: currentStaff?.name || 'Admin',
+      date: new Date().toISOString().split('T')[0]
+    };
+
+    if (onWalletTransaction) {
+      onWalletTransaction(newTx, updatedMember);
+    } else {
+      onUpdateStaff(staff.map(s => s.id === updatedMember.id ? updatedMember : s));
+    }
+
+    setSelectedProfileStaff(updatedMember);
+    setShowStaffWalletModal(false);
+    setStaffWalletAmount('');
+    setStaffWalletNote('');
+    setStaffWalletTrxId('');
+  };
 
   // Handle direct time change from inputs
   const handleTimeChange = (staffId: string, field: 'checkIn' | 'checkOut', newTime: string) => {
@@ -452,6 +554,48 @@ const Employees: React.FC<EmployeesProps> = ({
     }
   };
 
+  // Add / Edit Modal Openers
+  const handleOpenAddStaff = () => {
+    setEditingStaff(null);
+    setStaffForm(initialStaffForm);
+    setShowAddStaffModal(true);
+  };
+
+  const handleOpenEditStaff = (member: Staff) => {
+    setEditingStaff(member);
+    setStaffForm({
+      ...initialStaffForm,
+      ...member,
+      overtimeRatePerHour: member.overtimeRatePerHour || member.salaryStructure?.overtimeRatePerHour || 100,
+      salaryStructure: {
+        ...initialStaffForm.salaryStructure,
+        ...(member.salaryStructure || {}),
+        basic: member.salaryStructure?.basic ?? 15000,
+        salaryType: member.salaryStructure?.salaryType || 'monthly',
+        travelAllowance: member.salaryStructure?.travelAllowance ?? 2000,
+        travelAllowanceReason: member.salaryStructure?.travelAllowanceReason || 'যাতায়াত ও ভ্রমণ খরচ',
+        foodAllowance: member.salaryStructure?.foodAllowance ?? 2000,
+        foodAllowanceReason: member.salaryStructure?.foodAllowanceReason || 'খাবার ও লাঞ্চ ভাতা',
+        mobileAllowance: member.salaryStructure?.mobileAllowance ?? 1000,
+        mobileAllowanceReason: member.salaryStructure?.mobileAllowanceReason || 'মোবাইল ও ডেটা বিল',
+        houseRentAllowance: member.salaryStructure?.houseRentAllowance ?? 0,
+        houseRentReason: member.salaryStructure?.houseRentReason || 'বাড়ি ভাড়া সহায়তা বাবদ ভাতা',
+        medicalAllowance: member.salaryStructure?.medicalAllowance ?? 0,
+        medicalReason: member.salaryStructure?.medicalReason || 'চিকিৎসা ভাতা',
+        specialAllowance: member.salaryStructure?.specialAllowance ?? 0,
+        specialReason: member.salaryStructure?.specialReason || 'বিশেষ দক্ষতা ও দায়িত্ব ভাতা',
+        otherAllowance: member.salaryStructure?.otherAllowance ?? 0,
+        otherAllowanceReason: member.salaryStructure?.otherAllowanceReason || 'অন্যান্য নিয়মিত সুবিধা',
+        dailyAllowance: member.salaryStructure?.dailyAllowance ?? 0,
+        fixedBonus: member.salaryStructure?.fixedBonus ?? 0,
+        fixedBonusReason: member.salaryStructure?.fixedBonusReason || 'উৎসব / ইনসেন্টিভ বোনাস',
+        providentFundDeduction: member.salaryStructure?.providentFundDeduction ?? 0,
+        taxDeduction: member.salaryStructure?.taxDeduction ?? 0
+      }
+    });
+    setShowAddStaffModal(true);
+  };
+
   // Add / Edit Staff Handler
   const handleSaveStaff = (e: React.FormEvent) => {
     e.preventDefault();
@@ -461,14 +605,69 @@ const Employees: React.FC<EmployeesProps> = ({
     }
 
     if (editingStaff) {
-      const updatedList = staff.map(s => s.id === editingStaff.id ? {
-        ...s,
+      const updatedStaffMember: Staff = {
+        ...editingStaff,
         ...staffForm,
-        email: staffForm.email ? staffForm.email.trim().toLowerCase() : ''
-      } as Staff : s);
+        email: staffForm.email ? staffForm.email.trim().toLowerCase() : '',
+        overtimeRatePerHour: staffForm.overtimeRatePerHour || staffForm.salaryStructure?.overtimeRatePerHour || 100
+      } as Staff;
+
+      const updatedList = staff.map(s => s.id === editingStaff.id ? updatedStaffMember : s);
       onUpdateStaff(updatedList);
-      alert('কর্মচারীর তথ্য সফলভাবে আপডেট করা হয়েছে!');
+
+      // Auto sync with draft payrolls if available
+      if (payrolls && onUpdatePayrolls && payrolls.length > 0) {
+        const staffPayrolls = payrolls.filter(p => p.staffId === editingStaff.id && p.status === 'Draft');
+        if (staffPayrolls.length > 0) {
+          const basic = updatedStaffMember.salaryStructure?.basic || 15000;
+          const travel = updatedStaffMember.salaryStructure?.travelAllowance || 0;
+          const food = updatedStaffMember.salaryStructure?.foodAllowance || 0;
+          const mobile = updatedStaffMember.salaryStructure?.mobileAllowance || 0;
+          const houseRent = updatedStaffMember.salaryStructure?.houseRentAllowance || 0;
+          const medical = updatedStaffMember.salaryStructure?.medicalAllowance || 0;
+          const special = updatedStaffMember.salaryStructure?.specialAllowance || 0;
+          const otherAllow = updatedStaffMember.salaryStructure?.otherAllowance || 0;
+          const fixedBonus = updatedStaffMember.salaryStructure?.fixedBonus || 0;
+          const pfDeduction = updatedStaffMember.salaryStructure?.providentFundDeduction || 0;
+          const taxDeduction = updatedStaffMember.salaryStructure?.taxDeduction || 0;
+
+          const totalAllowances = travel + food + mobile + houseRent + medical + special + otherAllow + fixedBonus;
+
+          const updatedPayrolls = payrolls.map(p => {
+            if (p.staffId === editingStaff.id && p.status === 'Draft') {
+              const currentOtherDeductions = (p.deductions || 0);
+              const netSalary = Math.max(0, basic + totalAllowances + (p.commission || 0) + (p.bonus || 0) + (p.overtime || 0) - currentOtherDeductions);
+              return {
+                ...p,
+                basic,
+                allowances: totalAllowances,
+                travelAllowance: travel,
+                travelAllowanceReason: updatedStaffMember.salaryStructure?.travelAllowanceReason,
+                foodAllowance: food,
+                foodAllowanceReason: updatedStaffMember.salaryStructure?.foodAllowanceReason,
+                mobileAllowance: mobile,
+                mobileAllowanceReason: updatedStaffMember.salaryStructure?.mobileAllowanceReason,
+                houseRentAllowance: houseRent,
+                houseRentReason: updatedStaffMember.salaryStructure?.houseRentReason,
+                medicalAllowance: medical,
+                medicalReason: updatedStaffMember.salaryStructure?.medicalReason,
+                specialAllowance: special,
+                specialReason: updatedStaffMember.salaryStructure?.specialReason,
+                providentFundDeduction: pfDeduction,
+                taxDeduction: taxDeduction,
+                netSalary,
+                dueAmount: Math.max(0, netSalary - (p.paidAmount || 0))
+              };
+            }
+            return p;
+          });
+          onUpdatePayrolls(updatedPayrolls);
+        }
+      }
+
+      alert('কর্মচারীর প্রোফাইল ও বেতন-ভাতা সফলভাবে আপডেট করা হয়েছে!');
       setEditingStaff(null);
+      setShowAddStaffModal(false);
     } else {
       const newStaff: Staff = {
         ...staffForm as Staff,
@@ -476,10 +675,11 @@ const Employees: React.FC<EmployeesProps> = ({
         email: staffForm.email ? staffForm.email.trim().toLowerCase() : '',
         joinedDate: staffForm.joinedDate || today,
         isApproved: true,
-        status: staffForm.status || 'active'
+        status: staffForm.status || 'active',
+        overtimeRatePerHour: staffForm.overtimeRatePerHour || staffForm.salaryStructure?.overtimeRatePerHour || 100
       };
       onUpdateStaff([...staff, newStaff]);
-      alert('নতুন কর্মচারী সফলভাবে যুক্ত হয়েছে!');
+      alert('নতুন কর্মচারী ও বেতন-ভাতা সফলভাবে যুক্ত হয়েছে!');
       setShowAddStaffModal(false);
     }
 
@@ -559,11 +759,7 @@ const Employees: React.FC<EmployeesProps> = ({
           <div className="flex flex-wrap items-center gap-3 w-full lg:w-auto">
             {isAdmin && (
               <button 
-                onClick={() => {
-                  setStaffForm(initialStaffForm);
-                  setEditingStaff(null);
-                  setShowAddStaffModal(true);
-                }}
+                onClick={handleOpenAddStaff}
                 className="bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-600 hover:to-blue-700 text-white px-5 py-3 rounded-2xl font-black text-xs uppercase tracking-wider shadow-lg shadow-cyan-500/20 flex items-center gap-2 active:scale-95 transition-all"
               >
                 <Plus size={16} strokeWidth={3}/> নতুন কর্মচারী যুক্ত করুন
@@ -809,11 +1005,7 @@ const Employees: React.FC<EmployeesProps> = ({
                       {isAdmin && (
                         <div className="flex items-center gap-1.5">
                           <button 
-                            onClick={() => {
-                              setEditingStaff(member);
-                              setStaffForm(member);
-                              setShowAddStaffModal(true);
-                            }}
+                            onClick={() => handleOpenEditStaff(member)}
                             className="p-2 bg-blue-50 hover:bg-blue-100 text-blue-600 rounded-xl transition-all"
                             title="সম্পাদনা করুন"
                           >
@@ -934,11 +1126,7 @@ const Employees: React.FC<EmployeesProps> = ({
                             {isAdmin && (
                               <>
                                 <button 
-                                  onClick={() => {
-                                    setEditingStaff(member);
-                                    setStaffForm(member);
-                                    setShowAddStaffModal(true);
-                                  }}
+                                  onClick={() => handleOpenEditStaff(member)}
                                   className="p-2 bg-blue-50 hover:bg-blue-100 text-blue-600 rounded-xl"
                                   title="এডিট"
                                 >
@@ -1853,17 +2041,198 @@ const Employees: React.FC<EmployeesProps> = ({
                 </div>
               </div>
 
-              {/* Salary & Target Card */}
-              <div className="bg-slate-50 p-4 rounded-2xl border border-slate-200 space-y-3">
-                <h5 className="font-black text-xs text-slate-900 uppercase">বেতন ও মাসিক লক্ষ্যমাত্রা</h5>
-                <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+              {/* Comprehensive Salary Structure, Allowances & Presets */}
+              <div className="bg-gradient-to-br from-slate-50 via-slate-100/70 to-slate-50 p-4 sm:p-5 rounded-2xl border-2 border-slate-200 space-y-4">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-3 border-b border-slate-200">
                   <div>
-                    <label className="text-[10px] font-black text-slate-500 uppercase block mb-1">মূল বেতন (Basic)</label>
+                    <h5 className="font-black text-xs text-slate-900 uppercase flex items-center gap-2">
+                      <Banknote size={16} className="text-emerald-600" />
+                      বেতন কাঠামো ও সকল নিয়মিত ভাতাসমূহ (Salary & Allowances)
+                    </h5>
+                    <p className="text-[10px] text-slate-500 font-bold mt-0.5">
+                      এখানে নির্ধারিত ভাতাসমূহ স্বয়ংক্রিয়ভাবে প্রতি মাসের পেরোল ও রিপোর্টে কারণসহ অন্তর্ভুক্ত হবে
+                    </p>
+                  </div>
+
+                  {/* Quick Preset Buttons */}
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    <span className="text-[9px] font-black text-slate-400 uppercase mr-1">কুইক প্যাকেজ:</span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setStaffForm({
+                          ...staffForm,
+                          designation: 'ম্যানেজার',
+                          salaryStructure: {
+                            ...staffForm.salaryStructure,
+                            basic: 25000,
+                            travelAllowance: 3000,
+                            travelAllowanceReason: 'ম্যানেজারিয়াল সাইট ভিজিট ও যাতায়াত',
+                            foodAllowance: 3000,
+                            foodAllowanceReason: 'অফিস লাঞ্চ ভাতা',
+                            mobileAllowance: 1500,
+                            mobileAllowanceReason: 'কর্পোরেট সীম ও ইন্টারনেট বিল',
+                            houseRentAllowance: 5000,
+                            houseRentReason: 'বাড়ি ভাড়া ভাতা',
+                            medicalAllowance: 1500,
+                            medicalReason: 'চিকিৎসা ভাতা',
+                            specialAllowance: 2000,
+                            specialReason: 'ম্যানেজমেন্ট দায়িত্ব ভাতা',
+                            fixedBonus: 2500,
+                            fixedBonusReason: 'মাসিক ইনসেন্টিভ বোনাস',
+                            otherAllowance: 0,
+                            dailyAllowance: 0,
+                            providentFundDeduction: 1000,
+                            taxDeduction: 500,
+                            overtimeRatePerHour: 150
+                          } as any,
+                          overtimeRatePerHour: 150,
+                          targets: { monthly: 250000 }
+                        });
+                      }}
+                      className="px-2 py-1 bg-white hover:bg-slate-200 text-slate-700 rounded-lg text-[10px] font-black border border-slate-200 transition-all shadow-xs"
+                    >
+                      👔 ম্যানেজার
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setStaffForm({
+                          ...staffForm,
+                          designation: 'বিক্রয় প্রতিনিধি',
+                          salaryStructure: {
+                            ...staffForm.salaryStructure,
+                            basic: 15000,
+                            travelAllowance: 2000,
+                            travelAllowanceReason: 'লোকাল যাতায়াত ভাতা',
+                            foodAllowance: 2000,
+                            foodAllowanceReason: 'লাঞ্চ সুবিধা',
+                            mobileAllowance: 1000,
+                            mobileAllowanceReason: 'কাস্টমার ফলোআপ কল ও ডেটা',
+                            houseRentAllowance: 2000,
+                            houseRentReason: 'আবাসন সুবিধা',
+                            medicalAllowance: 500,
+                            medicalReason: 'মেডিকেল সাপোর্ট',
+                            specialAllowance: 1000,
+                            specialReason: 'বিক্রয় টার্গেট অর্জন ভাতা',
+                            fixedBonus: 1500,
+                            fixedBonusReason: 'পারফরম্যান্স বোনাস',
+                            otherAllowance: 0,
+                            dailyAllowance: 0,
+                            providentFundDeduction: 500,
+                            taxDeduction: 0,
+                            overtimeRatePerHour: 100
+                          } as any,
+                          overtimeRatePerHour: 100,
+                          targets: { monthly: 150000 }
+                        });
+                      }}
+                      className="px-2 py-1 bg-white hover:bg-slate-200 text-slate-700 rounded-lg text-[10px] font-black border border-slate-200 transition-all shadow-xs"
+                    >
+                      🛍️ সেলসম্যান
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setStaffForm({
+                          ...staffForm,
+                          designation: 'ডেলিভারি ম্যান',
+                          salaryStructure: {
+                            ...staffForm.salaryStructure,
+                            basic: 12000,
+                            travelAllowance: 4000,
+                            travelAllowanceReason: 'বাইক ফুয়েল ও ডেলিভারি যাতায়াত',
+                            foodAllowance: 2500,
+                            foodAllowanceReason: 'মাঠপর্যায়ে খাবার খরচ',
+                            mobileAllowance: 1000,
+                            mobileAllowanceReason: 'কাস্টমার ডেলিভারি কল বিল',
+                            houseRentAllowance: 1000,
+                            houseRentReason: 'বাড়ি ভাড়া ভাতা',
+                            medicalAllowance: 500,
+                            medicalReason: 'ফার্স্ট এইড ও মেডিকেল ভাতা',
+                            specialAllowance: 1000,
+                            specialReason: 'অন-টাইম ডেলিভারি ইনসেন্টিভ',
+                            fixedBonus: 1000,
+                            fixedBonusReason: 'মাসিক বোনাস',
+                            otherAllowance: 0,
+                            dailyAllowance: 50,
+                            providentFundDeduction: 0,
+                            taxDeduction: 0,
+                            overtimeRatePerHour: 90
+                          } as any,
+                          overtimeRatePerHour: 90,
+                          targets: { monthly: 80000 }
+                        });
+                      }}
+                      className="px-2 py-1 bg-white hover:bg-slate-200 text-slate-700 rounded-lg text-[10px] font-black border border-slate-200 transition-all shadow-xs"
+                    >
+                      🚚 ডেলিভারি
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setStaffForm({
+                          ...staffForm,
+                          designation: 'ক্যাশিয়ার',
+                          salaryStructure: {
+                            ...staffForm.salaryStructure,
+                            basic: 18000,
+                            travelAllowance: 2000,
+                            travelAllowanceReason: 'যাতায়াত ভাতা',
+                            foodAllowance: 2000,
+                            foodAllowanceReason: 'লাঞ্চ সুবিধা',
+                            mobileAllowance: 1000,
+                            mobileAllowanceReason: 'মোবাইল বিল',
+                            houseRentAllowance: 3000,
+                            houseRentReason: 'বাড়ি ভাড়া ভাতা',
+                            medicalAllowance: 1000,
+                            medicalReason: 'চিকিৎসা ভাতা',
+                            specialAllowance: 2000,
+                            specialReason: 'ক্যাশ হ্যান্ডলিং রিক্স ও বিশেষ ভাতা',
+                            fixedBonus: 2000,
+                            fixedBonusReason: 'হিসাব সংরক্ষণ বোনাস',
+                            otherAllowance: 0,
+                            dailyAllowance: 0,
+                            providentFundDeduction: 500,
+                            taxDeduction: 0,
+                            overtimeRatePerHour: 120
+                          } as any,
+                          overtimeRatePerHour: 120,
+                          targets: { monthly: 200000 }
+                        });
+                      }}
+                      className="px-2 py-1 bg-white hover:bg-slate-200 text-slate-700 rounded-lg text-[10px] font-black border border-slate-200 transition-all shadow-xs"
+                    >
+                      💳 ক্যাশিয়ার
+                    </button>
+                  </div>
+                </div>
+
+                {/* Core Salary Settings */}
+                <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
+                  <div>
+                    <label className="text-[10px] font-black text-slate-700 uppercase block mb-1">বেতনের ধরন</label>
+                    <select
+                      className="w-full bg-white border border-slate-300 focus:border-cyan-500 rounded-xl p-2.5 text-xs font-black outline-none"
+                      value={staffForm.salaryStructure?.salaryType || 'monthly'}
+                      onChange={e => setStaffForm({
+                        ...staffForm,
+                        salaryStructure: { ...staffForm.salaryStructure, salaryType: e.target.value as any } as any
+                      })}
+                    >
+                      <option value="monthly">মাসিক চুক্তি (Monthly)</option>
+                      <option value="daily">দৈনিক চুক্তি (Daily)</option>
+                      <option value="hourly">ঘণ্টাপ্রতি চুক্তি (Hourly)</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="text-[10px] font-black text-emerald-800 uppercase block mb-1">মূল বেতন (Basic Salary ৳)</label>
                     <input 
                       type="number" 
                       placeholder="15000" 
-                      className="w-full bg-white border border-slate-200 rounded-xl p-2.5 text-xs font-black text-emerald-800 outline-none"
-                      value={staffForm.salaryStructure?.basic || ''}
+                      className="w-full bg-white border-2 border-emerald-300 focus:border-emerald-500 rounded-xl p-2.5 text-xs font-black text-emerald-800 outline-none"
+                      value={staffForm.salaryStructure?.basic !== undefined ? staffForm.salaryStructure.basic : ''}
                       onChange={e => setStaffForm({ 
                         ...staffForm, 
                         salaryStructure: { ...staffForm.salaryStructure, basic: parseFloat(e.target.value) || 0 } as any 
@@ -1872,33 +2241,30 @@ const Employees: React.FC<EmployeesProps> = ({
                   </div>
 
                   <div>
-                    <label className="text-[10px] font-black text-slate-500 uppercase block mb-1">ভাতা (Allowances)</label>
+                    <label className="text-[10px] font-black text-slate-700 uppercase block mb-1">ওভারটাইম রেট (৳/ঘণ্টা)</label>
                     <input 
                       type="number" 
-                      placeholder="3000" 
-                      className="w-full bg-white border border-slate-200 rounded-xl p-2.5 text-xs font-black outline-none"
-                      value={(staffForm.salaryStructure?.travelAllowance || 0) + (staffForm.salaryStructure?.foodAllowance || 0)}
+                      placeholder="100" 
+                      className="w-full bg-white border border-slate-300 focus:border-cyan-500 rounded-xl p-2.5 text-xs font-black text-slate-800 outline-none"
+                      value={staffForm.overtimeRatePerHour || staffForm.salaryStructure?.overtimeRatePerHour || ''}
                       onChange={e => {
                         const val = parseFloat(e.target.value) || 0;
                         setStaffForm({ 
                           ...staffForm, 
-                          salaryStructure: { 
-                            ...staffForm.salaryStructure, 
-                            travelAllowance: Math.round(val / 2),
-                            foodAllowance: Math.round(val / 2)
-                          } as any 
+                          overtimeRatePerHour: val,
+                          salaryStructure: { ...staffForm.salaryStructure, overtimeRatePerHour: val } as any 
                         });
                       }}
                     />
                   </div>
 
                   <div>
-                    <label className="text-[10px] font-black text-slate-500 uppercase block mb-1">মাসিক বিক্রয় টার্গেট</label>
+                    <label className="text-[10px] font-black text-cyan-800 uppercase block mb-1">মাসিক বিক্রয় টার্গেট (৳)</label>
                     <input 
                       type="number" 
                       placeholder="100000" 
-                      className="w-full bg-white border border-slate-200 rounded-xl p-2.5 text-xs font-black text-cyan-800 outline-none"
-                      value={staffForm.targets?.monthly || ''}
+                      className="w-full bg-white border border-slate-300 focus:border-cyan-500 rounded-xl p-2.5 text-xs font-black text-cyan-800 outline-none"
+                      value={staffForm.targets?.monthly !== undefined ? staffForm.targets.monthly : ''}
                       onChange={e => setStaffForm({ 
                         ...staffForm, 
                         targets: { ...staffForm.targets, monthly: parseFloat(e.target.value) || 0 } as any 
@@ -1906,6 +2272,403 @@ const Employees: React.FC<EmployeesProps> = ({
                     />
                   </div>
                 </div>
+
+                {/* 8 Granular Allowances & Reasons */}
+                <div className="pt-3 border-t border-slate-200 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <h6 className="font-black text-[11px] text-slate-800 uppercase flex items-center gap-1.5">
+                      <Sparkles size={14} className="text-amber-500" />
+                      নির্দিষ্ট ভাতাসমূহ ও কারণ (Allowances with Specific Reasons)
+                    </h6>
+                    <span className="text-[10px] font-black text-slate-500 bg-white px-2 py-0.5 rounded-md border border-slate-200">
+                      টাকা ও কারণ উভয়ই সেভ থাকবে
+                    </span>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
+                    {/* 1. Travel Allowance */}
+                    <div className="bg-white p-3 rounded-xl border border-slate-200/90 shadow-xs space-y-2">
+                      <div className="flex items-center justify-between">
+                        <span className="font-black text-slate-700 flex items-center gap-1.5 text-[11px]">
+                          🚗 যাতায়াত / কনভেয়েন্স ভাতা (Travel)
+                        </span>
+                        <div className="w-28 relative">
+                          <span className="absolute left-2.5 top-2 text-[10px] font-black text-slate-400">৳</span>
+                          <input
+                            type="number"
+                            placeholder="0"
+                            className="w-full bg-slate-50 border border-slate-200 rounded-lg p-1.5 pl-6 text-xs font-black text-slate-800 outline-none focus:border-cyan-500"
+                            value={staffForm.salaryStructure?.travelAllowance || ''}
+                            onChange={e => setStaffForm({
+                              ...staffForm,
+                              salaryStructure: { ...staffForm.salaryStructure, travelAllowance: parseFloat(e.target.value) || 0 } as any
+                            })}
+                          />
+                        </div>
+                      </div>
+                      <input
+                        type="text"
+                        placeholder="ভাতার কারণ (উদাঃ প্রতিদিন অফিস ও ফিল্ডে যাতায়াত খরচ)"
+                        className="w-full bg-slate-50/70 border border-slate-200 rounded-lg px-2.5 py-1.5 text-[11px] font-medium text-slate-600 outline-none focus:border-cyan-500"
+                        value={staffForm.salaryStructure?.travelAllowanceReason || ''}
+                        onChange={e => setStaffForm({
+                          ...staffForm,
+                          salaryStructure: { ...staffForm.salaryStructure, travelAllowanceReason: e.target.value } as any
+                        })}
+                      />
+                    </div>
+
+                    {/* 2. Food Allowance */}
+                    <div className="bg-white p-3 rounded-xl border border-slate-200/90 shadow-xs space-y-2">
+                      <div className="flex items-center justify-between">
+                        <span className="font-black text-slate-700 flex items-center gap-1.5 text-[11px]">
+                          🍱 খাবার / লাঞ্চ ভাতা (Food / Lunch)
+                        </span>
+                        <div className="w-28 relative">
+                          <span className="absolute left-2.5 top-2 text-[10px] font-black text-slate-400">৳</span>
+                          <input
+                            type="number"
+                            placeholder="0"
+                            className="w-full bg-slate-50 border border-slate-200 rounded-lg p-1.5 pl-6 text-xs font-black text-slate-800 outline-none focus:border-cyan-500"
+                            value={staffForm.salaryStructure?.foodAllowance || ''}
+                            onChange={e => setStaffForm({
+                              ...staffForm,
+                              salaryStructure: { ...staffForm.salaryStructure, foodAllowance: parseFloat(e.target.value) || 0 } as any
+                            })}
+                          />
+                        </div>
+                      </div>
+                      <input
+                        type="text"
+                        placeholder="ভাতার কারণ (উদাঃ দৈনিক দুপুরের খাবারের ভাতা)"
+                        className="w-full bg-slate-50/70 border border-slate-200 rounded-lg px-2.5 py-1.5 text-[11px] font-medium text-slate-600 outline-none focus:border-cyan-500"
+                        value={staffForm.salaryStructure?.foodAllowanceReason || ''}
+                        onChange={e => setStaffForm({
+                          ...staffForm,
+                          salaryStructure: { ...staffForm.salaryStructure, foodAllowanceReason: e.target.value } as any
+                        })}
+                      />
+                    </div>
+
+                    {/* 3. Mobile Allowance */}
+                    <div className="bg-white p-3 rounded-xl border border-slate-200/90 shadow-xs space-y-2">
+                      <div className="flex items-center justify-between">
+                        <span className="font-black text-slate-700 flex items-center gap-1.5 text-[11px]">
+                          📱 মোবাইল ও ডেটা বিল (Mobile / Internet)
+                        </span>
+                        <div className="w-28 relative">
+                          <span className="absolute left-2.5 top-2 text-[10px] font-black text-slate-400">৳</span>
+                          <input
+                            type="number"
+                            placeholder="0"
+                            className="w-full bg-slate-50 border border-slate-200 rounded-lg p-1.5 pl-6 text-xs font-black text-slate-800 outline-none focus:border-cyan-500"
+                            value={staffForm.salaryStructure?.mobileAllowance || ''}
+                            onChange={e => setStaffForm({
+                              ...staffForm,
+                              salaryStructure: { ...staffForm.salaryStructure, mobileAllowance: parseFloat(e.target.value) || 0 } as any
+                            })}
+                          />
+                        </div>
+                      </div>
+                      <input
+                        type="text"
+                        placeholder="ভাতার কারণ (উদাঃ কাস্টমার সাপোর্ট ও ইন্টারনেট বিল)"
+                        className="w-full bg-slate-50/70 border border-slate-200 rounded-lg px-2.5 py-1.5 text-[11px] font-medium text-slate-600 outline-none focus:border-cyan-500"
+                        value={staffForm.salaryStructure?.mobileAllowanceReason || ''}
+                        onChange={e => setStaffForm({
+                          ...staffForm,
+                          salaryStructure: { ...staffForm.salaryStructure, mobileAllowanceReason: e.target.value } as any
+                        })}
+                      />
+                    </div>
+
+                    {/* 4. House Rent Allowance */}
+                    <div className="bg-white p-3 rounded-xl border border-slate-200/90 shadow-xs space-y-2">
+                      <div className="flex items-center justify-between">
+                        <span className="font-black text-slate-700 flex items-center gap-1.5 text-[11px]">
+                          🏠 বাড়ি ভাড়া ভাতা (House Rent)
+                        </span>
+                        <div className="w-28 relative">
+                          <span className="absolute left-2.5 top-2 text-[10px] font-black text-slate-400">৳</span>
+                          <input
+                            type="number"
+                            placeholder="0"
+                            className="w-full bg-slate-50 border border-slate-200 rounded-lg p-1.5 pl-6 text-xs font-black text-slate-800 outline-none focus:border-cyan-500"
+                            value={staffForm.salaryStructure?.houseRentAllowance || ''}
+                            onChange={e => setStaffForm({
+                              ...staffForm,
+                              salaryStructure: { ...staffForm.salaryStructure, houseRentAllowance: parseFloat(e.target.value) || 0 } as any
+                            })}
+                          />
+                        </div>
+                      </div>
+                      <input
+                        type="text"
+                        placeholder="ভাতার কারণ (উদাঃ মাসিক আবাসন ও বাড়ি ভাড়া বাবদ ভাতা)"
+                        className="w-full bg-slate-50/70 border border-slate-200 rounded-lg px-2.5 py-1.5 text-[11px] font-medium text-slate-600 outline-none focus:border-cyan-500"
+                        value={staffForm.salaryStructure?.houseRentReason || ''}
+                        onChange={e => setStaffForm({
+                          ...staffForm,
+                          salaryStructure: { ...staffForm.salaryStructure, houseRentReason: e.target.value } as any
+                        })}
+                      />
+                    </div>
+
+                    {/* 5. Medical Allowance */}
+                    <div className="bg-white p-3 rounded-xl border border-slate-200/90 shadow-xs space-y-2">
+                      <div className="flex items-center justify-between">
+                        <span className="font-black text-slate-700 flex items-center gap-1.5 text-[11px]">
+                          💊 চিকিৎসা ভাতা (Medical)
+                        </span>
+                        <div className="w-28 relative">
+                          <span className="absolute left-2.5 top-2 text-[10px] font-black text-slate-400">৳</span>
+                          <input
+                            type="number"
+                            placeholder="0"
+                            className="w-full bg-slate-50 border border-slate-200 rounded-lg p-1.5 pl-6 text-xs font-black text-slate-800 outline-none focus:border-cyan-500"
+                            value={staffForm.salaryStructure?.medicalAllowance || ''}
+                            onChange={e => setStaffForm({
+                              ...staffForm,
+                              salaryStructure: { ...staffForm.salaryStructure, medicalAllowance: parseFloat(e.target.value) || 0 } as any
+                            })}
+                          />
+                        </div>
+                      </div>
+                      <input
+                        type="text"
+                        placeholder="ভাতার কারণ (উদাঃ নিয়মিত স্বাস্থ্য ও চিকিৎসা সহায়তা)"
+                        className="w-full bg-slate-50/70 border border-slate-200 rounded-lg px-2.5 py-1.5 text-[11px] font-medium text-slate-600 outline-none focus:border-cyan-500"
+                        value={staffForm.salaryStructure?.medicalReason || ''}
+                        onChange={e => setStaffForm({
+                          ...staffForm,
+                          salaryStructure: { ...staffForm.salaryStructure, medicalReason: e.target.value } as any
+                        })}
+                      />
+                    </div>
+
+                    {/* 6. Special Allowance */}
+                    <div className="bg-white p-3 rounded-xl border border-slate-200/90 shadow-xs space-y-2">
+                      <div className="flex items-center justify-between">
+                        <span className="font-black text-slate-700 flex items-center gap-1.5 text-[11px]">
+                          ⭐ বিশেষ / দক্ষতা ভাতা (Special)
+                        </span>
+                        <div className="w-28 relative">
+                          <span className="absolute left-2.5 top-2 text-[10px] font-black text-slate-400">৳</span>
+                          <input
+                            type="number"
+                            placeholder="0"
+                            className="w-full bg-slate-50 border border-slate-200 rounded-lg p-1.5 pl-6 text-xs font-black text-slate-800 outline-none focus:border-cyan-500"
+                            value={staffForm.salaryStructure?.specialAllowance || ''}
+                            onChange={e => setStaffForm({
+                              ...staffForm,
+                              salaryStructure: { ...staffForm.salaryStructure, specialAllowance: parseFloat(e.target.value) || 0 } as any
+                            })}
+                          />
+                        </div>
+                      </div>
+                      <input
+                        type="text"
+                        placeholder="ভাতার কারণ (উদাঃ অতিরিক্ত দায়িত্ব ও বিশেষ পারফরম্যান্স)"
+                        className="w-full bg-slate-50/70 border border-slate-200 rounded-lg px-2.5 py-1.5 text-[11px] font-medium text-slate-600 outline-none focus:border-cyan-500"
+                        value={staffForm.salaryStructure?.specialReason || ''}
+                        onChange={e => setStaffForm({
+                          ...staffForm,
+                          salaryStructure: { ...staffForm.salaryStructure, specialReason: e.target.value } as any
+                        })}
+                      />
+                    </div>
+
+                    {/* 7. Fixed Festival Bonus */}
+                    <div className="bg-white p-3 rounded-xl border border-slate-200/90 shadow-xs space-y-2">
+                      <div className="flex items-center justify-between">
+                        <span className="font-black text-slate-700 flex items-center gap-1.5 text-[11px]">
+                          🎁 নিয়মিত বোনাস / ইনসেন্টিভ (Fixed Bonus)
+                        </span>
+                        <div className="w-28 relative">
+                          <span className="absolute left-2.5 top-2 text-[10px] font-black text-slate-400">৳</span>
+                          <input
+                            type="number"
+                            placeholder="0"
+                            className="w-full bg-slate-50 border border-slate-200 rounded-lg p-1.5 pl-6 text-xs font-black text-slate-800 outline-none focus:border-cyan-500"
+                            value={staffForm.salaryStructure?.fixedBonus || ''}
+                            onChange={e => setStaffForm({
+                              ...staffForm,
+                              salaryStructure: { ...staffForm.salaryStructure, fixedBonus: parseFloat(e.target.value) || 0 } as any
+                            })}
+                          />
+                        </div>
+                      </div>
+                      <input
+                        type="text"
+                        placeholder="ভাতার কারণ (উদাঃ নিয়মিত মাসিক ইনসেন্টিভ / উৎসব বোনাস)"
+                        className="w-full bg-slate-50/70 border border-slate-200 rounded-lg px-2.5 py-1.5 text-[11px] font-medium text-slate-600 outline-none focus:border-cyan-500"
+                        value={staffForm.salaryStructure?.fixedBonusReason || ''}
+                        onChange={e => setStaffForm({
+                          ...staffForm,
+                          salaryStructure: { ...staffForm.salaryStructure, fixedBonusReason: e.target.value } as any
+                        })}
+                      />
+                    </div>
+
+                    {/* 8. Other Allowance & Daily Allowance */}
+                    <div className="bg-white p-3 rounded-xl border border-slate-200/90 shadow-xs space-y-2">
+                      <div className="flex items-center justify-between">
+                        <span className="font-black text-slate-700 flex items-center gap-1.5 text-[11px]">
+                          ➕ অন্যান্য নিয়মিত সুবিধা (Other Allowance)
+                        </span>
+                        <div className="w-28 relative">
+                          <span className="absolute left-2.5 top-2 text-[10px] font-black text-slate-400">৳</span>
+                          <input
+                            type="number"
+                            placeholder="0"
+                            className="w-full bg-slate-50 border border-slate-200 rounded-lg p-1.5 pl-6 text-xs font-black text-slate-800 outline-none focus:border-cyan-500"
+                            value={staffForm.salaryStructure?.otherAllowance || ''}
+                            onChange={e => setStaffForm({
+                              ...staffForm,
+                              salaryStructure: { ...staffForm.salaryStructure, otherAllowance: parseFloat(e.target.value) || 0 } as any
+                            })}
+                          />
+                        </div>
+                      </div>
+                      <input
+                        type="text"
+                        placeholder="ভাতার কারণ (উদাঃ অন্যান্য নিয়মিত ভাতা সুবিধা)"
+                        className="w-full bg-slate-50/70 border border-slate-200 rounded-lg px-2.5 py-1.5 text-[11px] font-medium text-slate-600 outline-none focus:border-cyan-500"
+                        value={staffForm.salaryStructure?.otherAllowanceReason || ''}
+                        onChange={e => setStaffForm({
+                          ...staffForm,
+                          salaryStructure: { ...staffForm.salaryStructure, otherAllowanceReason: e.target.value } as any
+                        })}
+                      />
+                    </div>
+                  </div>
+
+                  {/* Daily Allowance Per Day */}
+                  <div className="bg-amber-50/60 p-3 rounded-xl border border-amber-200/70 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                    <div>
+                      <span className="font-black text-amber-900 text-xs block">🗓️ দৈনিক উপস্থিতির অতিরিক্ত খোরাকি ভাতা (Daily Present Rate)</span>
+                      <p className="text-[10px] text-amber-700 font-medium mt-0.5">যে কয়দিন সশরীরে উপস্থিত থাকবে প্রতি দিনের জন্য অতিরিক্ত যোগ হবে</p>
+                    </div>
+                    <div className="w-36 relative">
+                      <span className="absolute left-2.5 top-2 text-[10px] font-black text-amber-600">৳/দিন</span>
+                      <input
+                        type="number"
+                        placeholder="0"
+                        className="w-full bg-white border border-amber-300 rounded-lg p-1.5 pl-10 text-xs font-black text-amber-950 outline-none focus:border-amber-500"
+                        value={staffForm.salaryStructure?.dailyAllowance || ''}
+                        onChange={e => setStaffForm({
+                          ...staffForm,
+                          salaryStructure: { ...staffForm.salaryStructure, dailyAllowance: parseFloat(e.target.value) || 0 } as any
+                        })}
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                {/* Default Deductions */}
+                <div className="pt-3 border-t border-slate-200">
+                  <h6 className="font-black text-[11px] text-rose-800 uppercase flex items-center gap-1.5 mb-2">
+                    <ShieldCheck size={14} className="text-rose-500" />
+                    নিয়মিত মাসিক কর্তন (Default Monthly Deductions)
+                  </h6>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div className="bg-white p-3 rounded-xl border border-rose-100 flex items-center justify-between">
+                      <div>
+                        <span className="font-black text-slate-700 text-xs block">🛡️ প্রভিডেন্ট ফান্ড / ডিপিএস (PF)</span>
+                        <span className="text-[10px] text-slate-400">প্রতি মাসে স্বয়ংক্রিয় কর্তন</span>
+                      </div>
+                      <div className="w-28 relative">
+                        <span className="absolute left-2.5 top-2 text-[10px] font-black text-slate-400">৳</span>
+                        <input
+                          type="number"
+                          placeholder="0"
+                          className="w-full bg-slate-50 border border-slate-200 rounded-lg p-1.5 pl-6 text-xs font-black text-rose-700 outline-none focus:border-rose-400"
+                          value={staffForm.salaryStructure?.providentFundDeduction || ''}
+                          onChange={e => setStaffForm({
+                            ...staffForm,
+                            salaryStructure: { ...staffForm.salaryStructure, providentFundDeduction: parseFloat(e.target.value) || 0 } as any
+                          })}
+                        />
+                      </div>
+                    </div>
+
+                    <div className="bg-white p-3 rounded-xl border border-rose-100 flex items-center justify-between">
+                      <div>
+                        <span className="font-black text-slate-700 text-xs block">🏦 আয়কর / ট্যাক্স কর্তন (Income Tax)</span>
+                        <span className="text-[10px] text-slate-400">সরকারি বা প্রাতিষ্ঠানিক ট্যাক্স</span>
+                      </div>
+                      <div className="w-28 relative">
+                        <span className="absolute left-2.5 top-2 text-[10px] font-black text-slate-400">৳</span>
+                        <input
+                          type="number"
+                          placeholder="0"
+                          className="w-full bg-slate-50 border border-slate-200 rounded-lg p-1.5 pl-6 text-xs font-black text-rose-700 outline-none focus:border-rose-400"
+                          value={staffForm.salaryStructure?.taxDeduction || ''}
+                          onChange={e => setStaffForm({
+                            ...staffForm,
+                            salaryStructure: { ...staffForm.salaryStructure, taxDeduction: parseFloat(e.target.value) || 0 } as any
+                          })}
+                        />
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Live Real-Time Package Calculation Summary */}
+                {(() => {
+                  const basic = Number(staffForm.salaryStructure?.basic) || 0;
+                  const travel = Number(staffForm.salaryStructure?.travelAllowance) || 0;
+                  const food = Number(staffForm.salaryStructure?.foodAllowance) || 0;
+                  const mobile = Number(staffForm.salaryStructure?.mobileAllowance) || 0;
+                  const houseRent = Number(staffForm.salaryStructure?.houseRentAllowance) || 0;
+                  const medical = Number(staffForm.salaryStructure?.medicalAllowance) || 0;
+                  const special = Number(staffForm.salaryStructure?.specialAllowance) || 0;
+                  const fixedBonus = Number(staffForm.salaryStructure?.fixedBonus) || 0;
+                  const otherAllow = Number(staffForm.salaryStructure?.otherAllowance) || 0;
+                  const totalAllow = travel + food + mobile + houseRent + medical + special + fixedBonus + otherAllow;
+                  
+                  const pf = Number(staffForm.salaryStructure?.providentFundDeduction) || 0;
+                  const tax = Number(staffForm.salaryStructure?.taxDeduction) || 0;
+                  const totalDeduct = pf + tax;
+
+                  const gross = basic + totalAllow;
+                  const estNet = Math.max(0, gross - totalDeduct);
+
+                  return (
+                    <div className="bg-gradient-to-r from-slate-900 to-indigo-950 text-white p-4 rounded-xl border border-indigo-500/20 shadow-md">
+                      <div className="flex flex-wrap items-center justify-between gap-3 text-xs">
+                        <div>
+                          <span className="text-[10px] text-slate-400 uppercase font-black block">লাইভ প্যাকেজ প্রিভিউ</span>
+                          <span className="text-sm font-black text-cyan-300">
+                            মূল বেতন: ৳{basic.toLocaleString()} + মোট ভাতা: ৳{totalAllow.toLocaleString()}
+                          </span>
+                        </div>
+                        <div className="text-right">
+                          <span className="text-[10px] text-emerald-400 uppercase font-black block">সর্বমোট গ্রস মাসিক প্যাকেজ</span>
+                          <span className="text-lg font-black text-white">৳{gross.toLocaleString()}</span>
+                        </div>
+                      </div>
+                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mt-3 pt-3 border-t border-white/10 text-[11px]">
+                        <div>
+                          <span className="text-slate-400 text-[9px] block">যাতায়াত+খাবার:</span>
+                          <span className="font-black text-amber-300">৳{(travel + food).toLocaleString()}</span>
+                        </div>
+                        <div>
+                          <span className="text-slate-400 text-[9px] block">বাড়ি ভাড়া+মেডিকেল:</span>
+                          <span className="font-black text-amber-300">৳{(houseRent + medical).toLocaleString()}</span>
+                        </div>
+                        <div>
+                          <span className="text-slate-400 text-[9px] block">বিশেষ+বোনাস:</span>
+                          <span className="font-black text-amber-300">৳{(special + fixedBonus + otherAllow).toLocaleString()}</span>
+                        </div>
+                        <div>
+                          <span className="text-slate-400 text-[9px] block">মাসিক কর্তন (PF+Tax):</span>
+                          <span className="font-black text-rose-300">-৳{totalDeduct.toLocaleString()}</span>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })()}
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -1945,7 +2708,7 @@ const Employees: React.FC<EmployeesProps> = ({
                   type="submit"
                   className="px-6 py-3 rounded-2xl bg-gradient-to-r from-cyan-600 to-blue-600 text-white font-black text-xs uppercase tracking-wider shadow-lg shadow-cyan-600/20 active:scale-95 transition-all"
                 >
-                  {editingStaff ? 'তথ্য আপডেট করুন' : 'কর্মচারী সংরক্ষণ করুন'}
+                  {editingStaff ? 'তথ্য ও বেতন-ভাতা আপডেট করুন' : 'কর্মচারী ও বেতন-ভাতা সংরক্ষণ করুন'}
                 </button>
               </div>
             </form>
@@ -2031,6 +2794,260 @@ const Employees: React.FC<EmployeesProps> = ({
                   </div>
                 )}
               </div>
+
+              {/* ========================================================================= */}
+              {/* STAFF DIGITAL WALLET & EARNINGS HUB */}
+              {/* ========================================================================= */}
+              <div className="bg-gradient-to-br from-slate-900 via-slate-800 to-cyan-950 p-4 sm:p-5 rounded-2xl border border-cyan-500/20 text-white space-y-4 shadow-lg">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-xl bg-cyan-500/20 border border-cyan-500/30 flex items-center justify-center text-cyan-400">
+                      <Wallet size={20} />
+                    </div>
+                    <div>
+                      <span className="text-[10px] font-black uppercase tracking-widest text-cyan-400 block">
+                        Staff Rest Pay Digital Wallet
+                      </span>
+                      <div className="text-2xl font-black font-mono text-white">
+                        ৳{(selectedProfileStaff.walletBalance || 0).toLocaleString()}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Wallet Actions */}
+                  <div className="flex flex-wrap items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setStaffWalletActionType('topup');
+                        setShowStaffWalletModal(true);
+                      }}
+                      className="px-3 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl font-black text-[11px] uppercase tracking-wider flex items-center gap-1.5 active:scale-95 transition-all shadow-md shadow-emerald-600/30"
+                    >
+                      <Plus size={14} /> বেতন/টাকা জমা
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setStaffWalletActionType('bonus');
+                        setShowStaffWalletModal(true);
+                      }}
+                      className="px-3 py-2 bg-amber-500 hover:bg-amber-400 text-slate-950 rounded-xl font-black text-[11px] uppercase tracking-wider flex items-center gap-1.5 active:scale-95 transition-all"
+                    >
+                      <Gift size={14} /> বোনাস
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setStaffWalletActionType('withdraw');
+                        setShowStaffWalletModal(true);
+                      }}
+                      className="px-3 py-2 bg-rose-600/90 hover:bg-rose-600 text-white rounded-xl font-black text-[11px] uppercase tracking-wider flex items-center gap-1.5 active:scale-95 transition-all"
+                    >
+                      <ArrowUpRight size={14} /> উইথড্র / উত্তোলন
+                    </button>
+                  </div>
+                </div>
+
+                {/* Mini Stats Grid */}
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5 pt-3 border-t border-slate-700/60">
+                  <div className="bg-white/5 p-2.5 rounded-xl border border-white/10">
+                    <span className="text-[9px] font-bold text-slate-400 uppercase block">মোট অর্জিত আয়</span>
+                    <span className="text-xs font-black font-mono text-emerald-400">
+                      ৳{(selectedProfileStaff.totalWalletEarned || 0).toLocaleString()}
+                    </span>
+                  </div>
+
+                  <div className="bg-white/5 p-2.5 rounded-xl border border-white/10">
+                    <span className="text-[9px] font-bold text-slate-400 uppercase block">মোট ক্যাশ উত্তোলন</span>
+                    <span className="text-xs font-black font-mono text-rose-300">
+                      ৳{(selectedProfileStaff.totalWalletWithdrawn || 0).toLocaleString()}
+                    </span>
+                  </div>
+
+                  <div className="bg-white/5 p-2.5 rounded-xl border border-white/10 col-span-2 sm:col-span-1">
+                    <span className="text-[9px] font-bold text-slate-400 uppercase block">লেনদেন হিস্টোরি</span>
+                    <span className="text-xs font-black font-mono text-white">
+                      {staffWalletTxs.length} টি রেকর্ড
+                    </span>
+                  </div>
+                </div>
+
+                {/* Recent Staff Transactions list */}
+                {staffWalletTxs.length > 0 && (
+                  <div className="bg-slate-950/60 rounded-xl p-3 border border-slate-800 space-y-1.5 max-h-40 overflow-y-auto custom-scrollbar">
+                    <span className="text-[9px] font-black uppercase tracking-wider text-slate-400 block mb-1">
+                      সাম্প্রতিক ওয়ালেট লেনদেন
+                    </span>
+                    {staffWalletTxs.slice(0, 5).map(tx => {
+                      const isCredit = tx.type === 'topup' || tx.type === 'bonus';
+                      return (
+                        <div key={tx.id} className="flex items-center justify-between text-[11px] py-1 border-b border-slate-800/60 last:border-0">
+                          <div className="flex items-center gap-2">
+                            <span className={`w-4 h-4 rounded-full flex items-center justify-center text-[9px] font-black ${isCredit ? 'bg-emerald-500/20 text-emerald-400' : 'bg-rose-500/20 text-rose-400'}`}>
+                              {isCredit ? '+' : '-'}
+                            </span>
+                            <span className="text-slate-300 font-bold">{tx.note || (isCredit ? 'ক্রেডিট' : 'উইথড্র')}</span>
+                            <span className="text-[9px] text-slate-500 font-mono">{tx.date}</span>
+                          </div>
+                          <div className="text-right">
+                            <span className={`font-mono font-black ${isCredit ? 'text-emerald-400' : 'text-rose-400'}`}>
+                              {isCredit ? '+' : '-'}৳{tx.amount.toLocaleString()}
+                            </span>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+
+              {/* Detailed Salary & Allowances Breakdown in Profile */}
+              {selectedProfileStaff.salaryStructure && (
+                <div className="bg-emerald-50/60 p-3.5 rounded-xl border border-emerald-200/80 space-y-2.5">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[10px] font-black text-emerald-900 uppercase flex items-center gap-1.5">
+                      <Banknote size={14} className="text-emerald-700" /> বেতন ও নির্দিষ্ট ভাতাসমূহের বিবরণ
+                    </span>
+                    <span className="text-[11px] font-black text-emerald-800 bg-white px-2.5 py-0.5 rounded-lg border border-emerald-200 shadow-xs">
+                      মোট মাসিক গ্রস: ৳{(
+                        (selectedProfileStaff.salaryStructure?.basic || 0) +
+                        (selectedProfileStaff.salaryStructure?.travelAllowance || 0) +
+                        (selectedProfileStaff.salaryStructure?.foodAllowance || 0) +
+                        (selectedProfileStaff.salaryStructure?.mobileAllowance || 0) +
+                        (selectedProfileStaff.salaryStructure?.houseRentAllowance || 0) +
+                        (selectedProfileStaff.salaryStructure?.medicalAllowance || 0) +
+                        (selectedProfileStaff.salaryStructure?.specialAllowance || 0) +
+                        (selectedProfileStaff.salaryStructure?.fixedBonus || 0) +
+                        (selectedProfileStaff.salaryStructure?.otherAllowance || 0)
+                      ).toLocaleString()}
+                    </span>
+                  </div>
+
+                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                    {/* Basic */}
+                    <div className="bg-white p-2 rounded-lg border border-emerald-100 shadow-xs">
+                      <span className="text-[9px] text-slate-400 font-bold block">মূল বেতন (Basic)</span>
+                      <span className="font-black text-emerald-700 text-xs">৳{(selectedProfileStaff.salaryStructure?.basic || 0).toLocaleString()}</span>
+                    </div>
+
+                    {/* Travel */}
+                    {(selectedProfileStaff.salaryStructure?.travelAllowance || 0) > 0 && (
+                      <div className="bg-white p-2 rounded-lg border border-emerald-100 shadow-xs">
+                        <span className="text-[9px] text-slate-400 font-bold block">যাতায়াত ভাতা</span>
+                        <span className="font-black text-slate-800 text-xs">৳{(selectedProfileStaff.salaryStructure?.travelAllowance || 0).toLocaleString()}</span>
+                        {selectedProfileStaff.salaryStructure?.travelAllowanceReason && (
+                          <p className="text-[9px] text-slate-500 truncate" title={selectedProfileStaff.salaryStructure.travelAllowanceReason}>
+                            {selectedProfileStaff.salaryStructure.travelAllowanceReason}
+                          </p>
+                        )}
+                      </div>
+                    )}
+
+                    {/* Food */}
+                    {(selectedProfileStaff.salaryStructure?.foodAllowance || 0) > 0 && (
+                      <div className="bg-white p-2 rounded-lg border border-emerald-100 shadow-xs">
+                        <span className="text-[9px] text-slate-400 font-bold block">খাবার / লাঞ্চ ভাতা</span>
+                        <span className="font-black text-slate-800 text-xs">৳{(selectedProfileStaff.salaryStructure?.foodAllowance || 0).toLocaleString()}</span>
+                        {selectedProfileStaff.salaryStructure?.foodAllowanceReason && (
+                          <p className="text-[9px] text-slate-500 truncate" title={selectedProfileStaff.salaryStructure.foodAllowanceReason}>
+                            {selectedProfileStaff.salaryStructure.foodAllowanceReason}
+                          </p>
+                        )}
+                      </div>
+                    )}
+
+                    {/* Mobile */}
+                    {(selectedProfileStaff.salaryStructure?.mobileAllowance || 0) > 0 && (
+                      <div className="bg-white p-2 rounded-lg border border-emerald-100 shadow-xs">
+                        <span className="text-[9px] text-slate-400 font-bold block">মোবাইল বিল</span>
+                        <span className="font-black text-slate-800 text-xs">৳{(selectedProfileStaff.salaryStructure?.mobileAllowance || 0).toLocaleString()}</span>
+                        {selectedProfileStaff.salaryStructure?.mobileAllowanceReason && (
+                          <p className="text-[9px] text-slate-500 truncate" title={selectedProfileStaff.salaryStructure.mobileAllowanceReason}>
+                            {selectedProfileStaff.salaryStructure.mobileAllowanceReason}
+                          </p>
+                        )}
+                      </div>
+                    )}
+
+                    {/* House Rent */}
+                    {(selectedProfileStaff.salaryStructure?.houseRentAllowance || 0) > 0 && (
+                      <div className="bg-white p-2 rounded-lg border border-emerald-100 shadow-xs">
+                        <span className="text-[9px] text-slate-400 font-bold block">বাড়ি ভাড়া ভাতা</span>
+                        <span className="font-black text-slate-800 text-xs">৳{(selectedProfileStaff.salaryStructure?.houseRentAllowance || 0).toLocaleString()}</span>
+                        {selectedProfileStaff.salaryStructure?.houseRentReason && (
+                          <p className="text-[9px] text-slate-500 truncate" title={selectedProfileStaff.salaryStructure.houseRentReason}>
+                            {selectedProfileStaff.salaryStructure.houseRentReason}
+                          </p>
+                        )}
+                      </div>
+                    )}
+
+                    {/* Medical */}
+                    {(selectedProfileStaff.salaryStructure?.medicalAllowance || 0) > 0 && (
+                      <div className="bg-white p-2 rounded-lg border border-emerald-100 shadow-xs">
+                        <span className="text-[9px] text-slate-400 font-bold block">চিকিৎসা ভাতা</span>
+                        <span className="font-black text-slate-800 text-xs">৳{(selectedProfileStaff.salaryStructure?.medicalAllowance || 0).toLocaleString()}</span>
+                        {selectedProfileStaff.salaryStructure?.medicalReason && (
+                          <p className="text-[9px] text-slate-500 truncate" title={selectedProfileStaff.salaryStructure.medicalReason}>
+                            {selectedProfileStaff.salaryStructure.medicalReason}
+                          </p>
+                        )}
+                      </div>
+                    )}
+
+                    {/* Special */}
+                    {(selectedProfileStaff.salaryStructure?.specialAllowance || 0) > 0 && (
+                      <div className="bg-white p-2 rounded-lg border border-emerald-100 shadow-xs">
+                        <span className="text-[9px] text-slate-400 font-bold block">বিশেষ ভাতা</span>
+                        <span className="font-black text-slate-800 text-xs">৳{(selectedProfileStaff.salaryStructure?.specialAllowance || 0).toLocaleString()}</span>
+                        {selectedProfileStaff.salaryStructure?.specialReason && (
+                          <p className="text-[9px] text-slate-500 truncate" title={selectedProfileStaff.salaryStructure.specialReason}>
+                            {selectedProfileStaff.salaryStructure.specialReason}
+                          </p>
+                        )}
+                      </div>
+                    )}
+
+                    {/* Bonus */}
+                    {(selectedProfileStaff.salaryStructure?.fixedBonus || 0) > 0 && (
+                      <div className="bg-white p-2 rounded-lg border border-emerald-100 shadow-xs">
+                        <span className="text-[9px] text-slate-400 font-bold block">নিয়মিত বোনাস</span>
+                        <span className="font-black text-slate-800 text-xs">৳{(selectedProfileStaff.salaryStructure?.fixedBonus || 0).toLocaleString()}</span>
+                      </div>
+                    )}
+
+                    {/* Daily Allowance Rate */}
+                    {(selectedProfileStaff.salaryStructure?.dailyAllowance || 0) > 0 && (
+                      <div className="bg-white p-2 rounded-lg border border-amber-200 shadow-xs">
+                        <span className="text-[9px] text-amber-800 font-bold block">দৈনিক খোরাকি রেট</span>
+                        <span className="font-black text-amber-900 text-xs">৳{(selectedProfileStaff.salaryStructure?.dailyAllowance || 0).toLocaleString()} / দিন</span>
+                      </div>
+                    )}
+
+                    {/* Overtime rate */}
+                    <div className="bg-white p-2 rounded-lg border border-slate-100 shadow-xs">
+                      <span className="text-[9px] text-slate-400 font-bold block">ওভারটাইম রেট</span>
+                      <span className="font-black text-slate-800 text-xs">৳{selectedProfileStaff.overtimeRatePerHour || selectedProfileStaff.salaryStructure?.overtimeRatePerHour || 100} / ঘণ্টা</span>
+                    </div>
+                  </div>
+
+                  {/* Deductions in Profile */}
+                  {((selectedProfileStaff.salaryStructure?.providentFundDeduction || 0) > 0 || (selectedProfileStaff.salaryStructure?.taxDeduction || 0) > 0) && (
+                    <div className="flex items-center gap-3 pt-1 text-[10px] font-bold text-rose-700">
+                      <span>নিয়মিত কর্তন:</span>
+                      {(selectedProfileStaff.salaryStructure?.providentFundDeduction || 0) > 0 && (
+                        <span>পিএফ: ৳{selectedProfileStaff.salaryStructure?.providentFundDeduction}</span>
+                      )}
+                      {(selectedProfileStaff.salaryStructure?.taxDeduction || 0) > 0 && (
+                        <span>ট্যাক্স: ৳{selectedProfileStaff.salaryStructure?.taxDeduction}</span>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
 
               {/* Bank & Mobile Banking Info */}
               {(selectedProfileStaff.bkashNo || selectedProfileStaff.nagadNo || selectedProfileStaff.bankAccountNo) && (
@@ -2211,6 +3228,161 @@ const Employees: React.FC<EmployeesProps> = ({
               >
                 আবেদন জমা দিন
               </button>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================================= */}
+      {/* STAFF WALLET ACTION MODAL (Topup / Bonus / Withdraw) */}
+      {/* ========================================================================= */}
+      {showStaffWalletModal && selectedProfileStaff && (
+        <div className="fixed inset-0 bg-slate-950/70 backdrop-blur-sm z-[110] flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl max-w-lg w-full p-6 sm:p-8 shadow-2xl border border-slate-200 animate-in zoom-in-95 duration-150">
+            <div className="flex items-center justify-between pb-4 border-b border-slate-100 mb-6">
+              <div className="flex items-center gap-3">
+                <div className={`w-11 h-11 rounded-2xl flex items-center justify-center ${
+                  staffWalletActionType === 'topup' 
+                    ? 'bg-emerald-500 text-white' 
+                    : staffWalletActionType === 'bonus'
+                    ? 'bg-amber-500 text-white'
+                    : 'bg-rose-500 text-white'
+                }`}>
+                  <Wallet size={22} />
+                </div>
+                <div>
+                  <h3 className="text-base font-black text-slate-900">
+                    {staffWalletActionType === 'topup' 
+                      ? 'স্টাফ ওয়ালেটে বেতন/টাকা জমা' 
+                      : staffWalletActionType === 'bonus'
+                      ? 'স্টাফ পারফর্মেন্স বোনাস প্রদান'
+                      : 'স্টাফ ওয়ালেট থেকে ক্যাশ উত্তোলন / উইথড্র'}
+                  </h3>
+                  <p className="text-xs text-slate-500 font-bold">
+                    {selectedProfileStaff.name} ({selectedProfileStaff.designation})
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowStaffWalletModal(false)}
+                className="p-2 text-slate-400 hover:text-slate-600 rounded-xl hover:bg-slate-100"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            {/* Current Balance Overview */}
+            <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200 mb-5 flex items-center justify-between">
+              <span className="text-xs font-black text-slate-500 uppercase tracking-wider">বর্তমান স্টাফ ওয়ালেট ব্যালেন্স:</span>
+              <span className="text-lg font-black font-mono text-cyan-700">
+                ৳{(selectedProfileStaff.walletBalance || 0).toLocaleString()}
+              </span>
+            </div>
+
+            <form onSubmit={handleExecuteStaffWalletAction} className="space-y-4">
+              <div>
+                <label className="text-xs font-black text-slate-700 uppercase tracking-wider block mb-1.5">
+                  টাকার পরিমাণ (৳) *
+                </label>
+                <input
+                  type="number"
+                  required
+                  min="1"
+                  step="any"
+                  value={staffWalletAmount}
+                  onChange={(e) => setStaffWalletAmount(e.target.value)}
+                  placeholder="যেমন: 10000"
+                  className="w-full text-xl font-mono font-black p-3.5 rounded-2xl border-2 border-slate-200 focus:border-cyan-600 outline-none transition-all"
+                  autoFocus
+                />
+              </div>
+
+              <div>
+                <label className="text-xs font-black text-slate-700 uppercase tracking-wider block mb-1.5">
+                  পেমেন্ট মাধ্যম / চ্যানেল
+                </label>
+                <select
+                  value={staffWalletGateway}
+                  onChange={(e) => setStaffWalletGateway(e.target.value)}
+                  className="w-full p-3.5 rounded-2xl border-2 border-slate-200 font-bold text-xs bg-white outline-none focus:border-cyan-600"
+                >
+                  <option value="cash">নগদ ক্যাশ (Cash in Hand)</option>
+                  <option value="bkash">বিকাশ (bKash)</option>
+                  <option value="nagad">নগদ (Nagad)</option>
+                  <option value="bank">ব্যাংক একাউন্ট ট্রান্সফার</option>
+                </select>
+              </div>
+
+              {staffWalletGateway !== 'cash' && (
+                <div>
+                  <label className="text-xs font-black text-slate-700 uppercase tracking-wider block mb-1.5">
+                    ট্রানজেকশন আইডি / রেফারেন্স (ঐচ্ছিক)
+                  </label>
+                  <input
+                    type="text"
+                    value={staffWalletTrxId}
+                    onChange={(e) => setStaffWalletTrxId(e.target.value)}
+                    placeholder="যেমন: 8B9K2M3N4"
+                    className="w-full p-3 rounded-2xl border-2 border-slate-200 font-mono text-xs bg-white outline-none focus:border-cyan-600 uppercase"
+                  />
+                </div>
+              )}
+
+              <div>
+                <label className="text-xs font-black text-slate-700 uppercase tracking-wider block mb-1.5">
+                  লেনদেনের উদ্দেশ্য / বিবরণ
+                </label>
+                <input
+                  type="text"
+                  value={staffWalletNote}
+                  onChange={(e) => setStaffWalletNote(e.target.value)}
+                  placeholder={
+                    staffWalletActionType === 'topup' 
+                      ? 'যেমন: চলতি মাসের অগ্রিম বেতন' 
+                      : staffWalletActionType === 'bonus' 
+                      ? 'যেমন: সেলস টার্গেট বোনাস' 
+                      : 'যেমন: নগদ উত্তোলন গ্রহণ'
+                  }
+                  className="w-full p-3 rounded-2xl border-2 border-slate-200 text-xs bg-white outline-none focus:border-cyan-600"
+                />
+              </div>
+
+              {/* Calculated New Balance Preview */}
+              {staffWalletAmount && parseFloat(staffWalletAmount) > 0 && (
+                <div className="p-3.5 rounded-2xl bg-cyan-50 border border-cyan-200 text-xs flex items-center justify-between text-cyan-900 font-bold">
+                  <span>লেনদেন পরবর্তী নতুন ব্যালেন্স:</span>
+                  <span className="font-mono text-sm font-black text-cyan-700">
+                    ৳{(
+                      staffWalletActionType === 'withdraw' 
+                        ? Math.max(0, (selectedProfileStaff.walletBalance || 0) - (parseFloat(staffWalletAmount) || 0))
+                        : (selectedProfileStaff.walletBalance || 0) + (parseFloat(staffWalletAmount) || 0)
+                    ).toLocaleString()}
+                  </span>
+                </div>
+              )}
+
+              <div className="flex items-center gap-3 pt-3">
+                <button
+                  type="button"
+                  onClick={() => setShowStaffWalletModal(false)}
+                  className="flex-1 py-3.5 rounded-2xl border-2 border-slate-200 text-slate-600 font-black text-xs uppercase hover:bg-slate-50 transition-all"
+                >
+                  বাতিল
+                </button>
+                <button
+                  type="submit"
+                  className={`flex-1 py-3.5 rounded-2xl font-black text-xs uppercase text-white shadow-lg active:scale-95 transition-all flex items-center justify-center gap-2 ${
+                    staffWalletActionType === 'topup' 
+                      ? 'bg-emerald-600 hover:bg-emerald-500 shadow-emerald-600/30' 
+                      : staffWalletActionType === 'bonus'
+                      ? 'bg-amber-600 hover:bg-amber-500 shadow-amber-600/30'
+                      : 'bg-rose-600 hover:bg-rose-500 shadow-rose-600/30'
+                  }`}
+                >
+                  <Check size={16} /> নিশ্চিত করুন
+                </button>
+              </div>
             </form>
           </div>
         </div>

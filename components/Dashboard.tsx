@@ -5,9 +5,10 @@ import {
   DollarSign, TrendingUp, AlertCircle, ShoppingBag, 
   Wallet, PieChart, Activity as ActivityIcon, Package, BarChart3,
   ArrowUpRight, ArrowDownRight, Users, User, Trophy, Zap, RotateCcw,
-  Tag, ChevronDown
+  Tag, ChevronDown, Calendar
 } from 'lucide-react';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
+import { getLocalDateString, formatDisplayDate, normalizeDate } from '../services/dateUtils';
 
 interface DashboardProps {
   sales: Sale[];
@@ -20,17 +21,6 @@ interface DashboardProps {
   isAdmin: boolean;
   currentStaff: Staff | null;
 }
-
-const normalizeDate = (dateStr: string) => {
-  if (!dateStr) return '';
-  return dateStr.includes('T') ? dateStr.split('T')[0] : dateStr;
-};
-
-const getLocalToday = () => {
-  const now = new Date();
-  const offset = now.getTimezoneOffset() * 60000;
-  return new Date(Date.now() - offset).toISOString().split('T')[0];
-};
 
 const StatCard = ({ title, value, subValue, icon: Icon, color, trend }: any) => {
   const colorMap: Record<string, { gradient: string; border: string; bgLight: string; text: string }> = {
@@ -115,7 +105,7 @@ const Dashboard: React.FC<DashboardProps> = ({ sales, collections, activities, p
   }, [approvedSales, isAdmin, currentStaff]);
 
   const stats = useMemo(() => {
-    const today = getLocalToday();
+    const today = getLocalDateString();
     const currentMonthPrefix = today.substring(0, 7);
     const currentYearPrefix = today.substring(0, 4);
     
@@ -127,7 +117,7 @@ const Dashboard: React.FC<DashboardProps> = ({ sales, collections, activities, p
       if (period === 'month') return normalized.startsWith(currentMonthPrefix);
       if (period === 'year') return normalized.startsWith(currentYearPrefix);
       if (period === 'week') {
-        const diff = (new Date(today).getTime() - new Date(normalized).getTime()) / (1000 * 3600 * 24);
+        const diff = (new Date(today + 'T00:00:00').getTime() - new Date(normalized + 'T00:00:00').getTime()) / (1000 * 3600 * 24);
         return diff <= 7 && diff >= 0;
       }
       return false;
@@ -171,10 +161,10 @@ const Dashboard: React.FC<DashboardProps> = ({ sales, collections, activities, p
     return [...Array(7)].map((_, i) => {
       const d = new Date();
       d.setDate(d.getDate() - (6 - i));
-      const dateStr = d.toISOString().split('T')[0];
+      const dateStr = getLocalDateString(d);
       const dailySales = userSales.filter(s => normalizeDate(s.date) === dateStr);
       return {
-        name: d.toLocaleDateString('en-US', { weekday: 'short' }),
+        name: d.toLocaleDateString('bn-BD', { weekday: 'short' }),
         retail: dailySales.filter(s => s.customerType !== 'wholesale').reduce((sum, s) => sum + (Number(s.total) || 0), 0),
         wholesale: dailySales.filter(s => s.customerType === 'wholesale').reduce((sum, s) => sum + (Number(s.total) || 0), 0)
       };
@@ -185,15 +175,22 @@ const Dashboard: React.FC<DashboardProps> = ({ sales, collections, activities, p
 
   return (
     <div className="space-y-8 sm:space-y-10 animate-in fade-in slide-in-from-bottom-6 duration-700">
-      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-8">
+      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-6">
         <div>
           <h2 className="text-2xl sm:text-4xl font-black text-slate-900 tracking-tighter uppercase">
             {isAdmin ? 'পারফরম্যান্স হাব' : 'আমার ড্যাশবোর্ড'} 
             <span className="text-primary/20 text-xl sm:text-2xl font-light ml-3">v2.1</span>
           </h2>
-          <p className="text-slate-500 font-black text-[10px] sm:text-xs mt-1 uppercase tracking-[3px]">
-            {isAdmin ? 'রিটেইল এবং হোলসেল রিয়েল-টাইম ডেটা' : `স্বাগতম, ${currentStaff?.name}!`}
-          </p>
+          <div className="flex flex-wrap items-center gap-2.5 mt-1.5">
+            <p className="text-slate-500 font-black text-[10px] sm:text-xs uppercase tracking-[2px]">
+              {isAdmin ? 'রিটেইল এবং হোলসেল রিয়েল-টাইম ডেটা' : `স্বাগতম, ${currentStaff?.name}!`}
+            </p>
+            <span className="text-slate-300 hidden sm:inline">•</span>
+            <div className="inline-flex items-center gap-1.5 px-3 py-1 bg-indigo-50 border border-indigo-200/80 rounded-full text-[11px] font-black text-indigo-950 shadow-2xs">
+              <Calendar size={13} className="text-indigo-600 shrink-0" />
+              <span>আজকের তারিখ: {formatDisplayDate(getLocalDateString())}</span>
+            </div>
+          </div>
         </div>
         <div className="relative w-full md:w-auto">
           <select 

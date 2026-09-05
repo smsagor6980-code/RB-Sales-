@@ -1,7 +1,7 @@
 import React, { useState, useMemo } from 'react';
 import { 
   Supplier, Product, Purchase, PurchaseItem, ProductCategory, 
-  SupplierPayment, SupplierReturn, ShopSettings, Staff 
+  SupplierPayment, SupplierReturn, ShopSettings, Staff, WalletTransaction 
 } from '../types';
 import { 
   Plus, Edit, Trash2, Search, X, Truck, Phone, Building2, 
@@ -10,7 +10,8 @@ import {
   ArrowUpRight, CreditCard, Wallet, Calculator, FileText, Printer,
   AlertCircle, ArrowRightLeft, ArrowDown, ArrowUp, ArrowRight, ChevronDown,
   Download, MessageCircle, Send, CheckCircle2, RotateCcw, ListFilter,
-  Eye, RefreshCw, Layers, ShieldCheck, Mail, MapPin, Tag, Sparkles
+  Eye, RefreshCw, Layers, ShieldCheck, Mail, MapPin, Tag, Sparkles,
+  ArrowDownLeft, Coins
 } from 'lucide-react';
 
 interface SuppliersProps {
@@ -28,6 +29,8 @@ interface SuppliersProps {
   isAdmin?: boolean;
   currentStaff?: Staff | null;
   shopSettings?: ShopSettings;
+  walletTransactions?: WalletTransaction[];
+  onWalletTransaction?: (txData: Omit<WalletTransaction, 'id' | 'createdAt'>, updatedSupplier: Supplier) => void;
 }
 
 const Suppliers: React.FC<SuppliersProps> = ({ 
@@ -44,7 +47,9 @@ const Suppliers: React.FC<SuppliersProps> = ({
   categories = [],
   isAdmin = false,
   currentStaff,
-  shopSettings
+  shopSettings,
+  walletTransactions = [],
+  onWalletTransaction
 }) => {
   // Navigation Tabs
   const [activeTab, setActiveTab] = useState<'directory' | 'purchases' | 'payments' | 'returns' | 'ledger'>('directory');
@@ -58,6 +63,14 @@ const Suppliers: React.FC<SuppliersProps> = ({
   const [showReturnModal, setShowReturnModal] = useState<string | null>(null);
   const [showPurchaseDetails, setShowPurchaseDetails] = useState<Purchase | null>(null);
   const [showPaymentReceipt, setShowPaymentReceipt] = useState<SupplierPayment | null>(null);
+
+  // Supplier Wallet Modal State
+  const [showSupplierWalletModal, setShowSupplierWalletModal] = useState(false);
+  const [supplierWalletActionType, setSupplierWalletActionType] = useState<'topup' | 'adjustment_deduct' | 'withdraw'>('topup');
+  const [supplierWalletAmount, setSupplierWalletAmount] = useState('');
+  const [supplierWalletNote, setSupplierWalletNote] = useState('');
+  const [supplierWalletGateway, setSupplierWalletGateway] = useState('bank');
+  const [supplierWalletTrxId, setSupplierWalletTrxId] = useState('');
 
   // Search & Filtering State
   const [search, setSearch] = useState('');
@@ -269,6 +282,74 @@ const Suppliers: React.FC<SuppliersProps> = ({
 
     return ledger.map(item => ({ ...item, balance: balanceMap[item.id] || 0 }));
   }, [activeSupplierLedger, profilePeriod]);
+
+  // Selected Profile Supplier Wallet Transactions
+  const supplierWalletTxs = useMemo(() => {
+    if (!activeSupplier) return [];
+    return walletTransactions.filter(tx => 
+      tx.profileId === activeSupplier.id ||
+      (tx.profileType === 'supplier' && tx.profilePhone === activeSupplier.phone) ||
+      (tx.customerId === activeSupplier.id)
+    ).sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
+  }, [walletTransactions, activeSupplier]);
+
+  const handleExecuteSupplierWalletAction = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!activeSupplier) return;
+    const numAmount = parseFloat(supplierWalletAmount);
+    if (isNaN(numAmount) || numAmount <= 0) return;
+
+    const currentBal = activeSupplier.walletBalance || 0;
+    let newBal = currentBal;
+    let newTotalDeposited = activeSupplier.totalWalletDeposited || 0;
+    let newTotalUsed = activeSupplier.totalWalletUsed || 0;
+
+    if (supplierWalletActionType === 'topup') {
+      newBal = currentBal + numAmount;
+      newTotalDeposited += numAmount;
+    } else {
+      // adjustment_deduct or withdraw
+      newBal = Math.max(0, currentBal - numAmount);
+      newTotalUsed += numAmount;
+    }
+
+    const updatedSupplier: Supplier = {
+      ...activeSupplier,
+      walletBalance: newBal,
+      totalWalletDeposited: newTotalDeposited,
+      totalWalletUsed: newTotalUsed
+    };
+
+    const newTx: Omit<WalletTransaction, 'id' | 'createdAt'> = {
+      profileType: 'supplier',
+      profileId: activeSupplier.id,
+      profileName: activeSupplier.name,
+      profilePhone: activeSupplier.phone,
+      type: supplierWalletActionType === 'withdraw' ? 'withdrawal' : supplierWalletActionType,
+      amount: numAmount,
+      gatewayId: supplierWalletGateway,
+      gatewayName: supplierWalletGateway === 'bkash' ? 'বিকাশ' : supplierWalletGateway === 'nagad' ? 'নগদ' : supplierWalletGateway === 'bank' ? 'ব্যাংক ডিপোজিট' : 'নগদ ক্যাশ',
+      trxId: supplierWalletTrxId || undefined,
+      note: supplierWalletNote || (supplierWalletActionType === 'topup' ? 'সাপ্লায়ার অগ্রিম জমা' : supplierWalletActionType === 'adjustment_deduct' ? 'বকেয়া বিলের সাথে ওয়ালেট সমন্বয়' : 'ওয়ালেট ব্যালেন্স রিফান্ড/উইথড্র'),
+      balanceBefore: currentBal,
+      balanceAfter: newBal,
+      status: 'approved',
+      approvedBy: currentStaff?.id,
+      approvedByName: currentStaff?.name || 'Admin',
+      date: new Date().toLocaleDateString('en-CA')
+    };
+
+    if (onWalletTransaction) {
+      onWalletTransaction(newTx, updatedSupplier);
+    } else {
+      onUpdate(suppliers.map(s => s.id === updatedSupplier.id ? updatedSupplier : s));
+    }
+
+    setShowSupplierWalletModal(false);
+    setSupplierWalletAmount('');
+    setSupplierWalletNote('');
+    setSupplierWalletTrxId('');
+  };
 
   // Form Reset & Open Handlers
   const resetForm = () => {
@@ -2305,6 +2386,89 @@ const Suppliers: React.FC<SuppliersProps> = ({
                   </div>
                 </div>
 
+                {/* ========================================================================= */}
+                {/* SUPPLIER REST PAY DIGITAL WALLET & ADVANCE HUB */}
+                {/* ========================================================================= */}
+                <div className="bg-gradient-to-br from-slate-900 via-indigo-950 to-slate-900 p-4 rounded-2xl border border-indigo-500/20 text-white space-y-3 shadow-lg">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2.5">
+                      <div className="w-8 h-8 rounded-xl bg-indigo-500/20 border border-indigo-500/30 flex items-center justify-center text-indigo-400">
+                        <Wallet size={16} />
+                      </div>
+                      <div>
+                        <span className="text-[9px] font-black uppercase tracking-widest text-indigo-300 block">
+                          Supplier Rest Pay Wallet
+                        </span>
+                        <div className="text-xl font-black font-mono text-white">
+                          ৳{(activeSupplier.walletBalance || 0).toLocaleString()}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-2 pt-2 border-t border-slate-700/60 text-[10px]">
+                    <div className="bg-white/5 p-2 rounded-xl border border-white/10">
+                      <span className="text-[8px] font-bold text-slate-400 uppercase block">মোট অগ্রিম জমা</span>
+                      <span className="text-[11px] font-black font-mono text-emerald-400">
+                        ৳{(activeSupplier.totalWalletDeposited || 0).toLocaleString()}
+                      </span>
+                    </div>
+                    <div className="bg-white/5 p-2 rounded-xl border border-white/10">
+                      <span className="text-[8px] font-bold text-slate-400 uppercase block">মোট সমন্বয়/উইথড্র</span>
+                      <span className="text-[11px] font-black font-mono text-amber-300">
+                        ৳{(activeSupplier.totalWalletUsed || 0).toLocaleString()}
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Supplier Wallet Action Buttons */}
+                  <div className="grid grid-cols-2 gap-2 pt-1">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSupplierWalletActionType('topup');
+                        setShowSupplierWalletModal(true);
+                      }}
+                      className="py-2 px-2.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl font-black text-[10px] uppercase tracking-wider flex items-center justify-center gap-1 active:scale-95 transition-all shadow-md"
+                    >
+                      <Plus size={13} /> অগ্রিম জমা
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSupplierWalletActionType('adjustment_deduct');
+                        setShowSupplierWalletModal(true);
+                      }}
+                      className="py-2 px-2.5 bg-white/10 hover:bg-white/20 text-white rounded-xl font-black text-[10px] uppercase tracking-wider flex items-center justify-center gap-1 active:scale-95 transition-all"
+                    >
+                      <ArrowRightLeft size={13} /> সমন্বয়
+                    </button>
+                  </div>
+
+                  {/* Recent Supplier Wallet transactions */}
+                  {supplierWalletTxs.length > 0 && (
+                    <div className="bg-slate-950/60 rounded-xl p-2.5 border border-slate-800 space-y-1 max-h-32 overflow-y-auto custom-scrollbar">
+                      <span className="text-[8px] font-black uppercase tracking-wider text-slate-400 block mb-1">
+                        সাম্প্রতিক ওয়ালেট হিস্টোরি
+                      </span>
+                      {supplierWalletTxs.slice(0, 3).map(tx => {
+                        const isCredit = tx.type === 'topup';
+                        return (
+                          <div key={tx.id} className="flex items-center justify-between text-[10px] py-0.5 border-b border-slate-800/60 last:border-0">
+                            <div className="truncate max-w-[130px]">
+                              <span className="text-slate-300 font-bold block truncate">{tx.note || 'লেনদেন'}</span>
+                              <span className="text-[8px] text-slate-500 font-mono">{tx.date}</span>
+                            </div>
+                            <span className={`font-mono font-black shrink-0 ${isCredit ? 'text-emerald-400' : 'text-rose-400'}`}>
+                              {isCredit ? '+' : '-'}৳{tx.amount.toLocaleString()}
+                            </span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+
                 {/* Info Card */}
                 <div className="p-3.5 sm:p-4 bg-slate-50 rounded-2xl border border-slate-100 space-y-2 sm:space-y-3 text-xs font-bold text-slate-700">
                   <p className="text-[10px] font-black text-slate-400 uppercase tracking-wider">যোগাযোগ ও ব্যাংক হিসাব</p>
@@ -2530,6 +2694,159 @@ const Suppliers: React.FC<SuppliersProps> = ({
                 বন্ধ করুন
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================================= */}
+      {/* SUPPLIER WALLET ACTION MODAL (Advance Topup / Deduct / Withdraw) */}
+      {/* ========================================================================= */}
+      {showSupplierWalletModal && activeSupplier && (
+        <div className="fixed inset-0 bg-slate-950/70 backdrop-blur-sm z-[110] flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl max-w-lg w-full p-6 sm:p-8 shadow-2xl border border-slate-200 animate-in zoom-in-95 duration-150">
+            <div className="flex items-center justify-between pb-4 border-b border-slate-100 mb-6">
+              <div className="flex items-center gap-3">
+                <div className={`w-11 h-11 rounded-2xl flex items-center justify-center ${
+                  supplierWalletActionType === 'topup' 
+                    ? 'bg-indigo-600 text-white' 
+                    : supplierWalletActionType === 'adjustment_deduct'
+                    ? 'bg-amber-600 text-white'
+                    : 'bg-rose-600 text-white'
+                }`}>
+                  <Wallet size={22} />
+                </div>
+                <div>
+                  <h3 className="text-base font-black text-slate-900">
+                    {supplierWalletActionType === 'topup' 
+                      ? 'সাপ্লায়ার একাউন্টে অগ্রিম টাকা জমা' 
+                      : supplierWalletActionType === 'adjustment_deduct'
+                      ? 'বকেয়া বিলের সাথে ওয়ালেট সমন্বয়'
+                      : 'ওয়ালেট ব্যালেন্স রিফান্ড / উত্তোলন'}
+                  </h3>
+                  <p className="text-xs text-slate-500 font-bold">
+                    {activeSupplier.name} ({activeSupplier.phone})
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowSupplierWalletModal(false)}
+                className="p-2 text-slate-400 hover:text-slate-600 rounded-xl hover:bg-slate-100"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            {/* Current Balance Overview */}
+            <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200 mb-5 flex items-center justify-between">
+              <span className="text-xs font-black text-slate-500 uppercase tracking-wider">বর্তমান ওয়ালেট ব্যালেন্স:</span>
+              <span className="text-lg font-black font-mono text-indigo-700">
+                ৳{(activeSupplier.walletBalance || 0).toLocaleString()}
+              </span>
+            </div>
+
+            <form onSubmit={handleExecuteSupplierWalletAction} className="space-y-4">
+              <div>
+                <label className="text-xs font-black text-slate-700 uppercase tracking-wider block mb-1.5">
+                  টাকার পরিমাণ (৳) *
+                </label>
+                <input
+                  type="number"
+                  required
+                  min="1"
+                  step="any"
+                  value={supplierWalletAmount}
+                  onChange={(e) => setSupplierWalletAmount(e.target.value)}
+                  placeholder="যেমন: 25000"
+                  className="w-full text-xl font-mono font-black p-3.5 rounded-2xl border-2 border-slate-200 focus:border-indigo-600 outline-none transition-all"
+                  autoFocus
+                />
+              </div>
+
+              <div>
+                <label className="text-xs font-black text-slate-700 uppercase tracking-wider block mb-1.5">
+                  পেমেন্ট মাধ্যম / চ্যানেল
+                </label>
+                <select
+                  value={supplierWalletGateway}
+                  onChange={(e) => setSupplierWalletGateway(e.target.value)}
+                  className="w-full p-3.5 rounded-2xl border-2 border-slate-200 font-bold text-xs bg-white outline-none focus:border-indigo-600"
+                >
+                  <option value="bank">ব্যাংক একাউন্ট ডিপোজিট</option>
+                  <option value="bkash">বিকাশ (bKash)</option>
+                  <option value="nagad">নগদ (Nagad)</option>
+                  <option value="cash">নগদ ক্যাশ (Cash)</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="text-xs font-black text-slate-700 uppercase tracking-wider block mb-1.5">
+                  ট্রানজেকশন আইডি / চেক নম্বর (ঐচ্ছিক)
+                </label>
+                <input
+                  type="text"
+                  value={supplierWalletTrxId}
+                  onChange={(e) => setSupplierWalletTrxId(e.target.value)}
+                  placeholder="যেমন: TXN-8849202"
+                  className="w-full p-3 rounded-2xl border-2 border-slate-200 font-mono text-xs bg-white outline-none focus:border-indigo-600 uppercase"
+                />
+              </div>
+
+              <div>
+                <label className="text-xs font-black text-slate-700 uppercase tracking-wider block mb-1.5">
+                  লেনদেনের উদ্দেশ্য / নোট
+                </label>
+                <input
+                  type="text"
+                  value={supplierWalletNote}
+                  onChange={(e) => setSupplierWalletNote(e.target.value)}
+                  placeholder={
+                    supplierWalletActionType === 'topup' 
+                      ? 'যেমন: আগামী চালানের অগ্রিম পেমেন্ট' 
+                      : supplierWalletActionType === 'adjustment_deduct' 
+                      ? 'যেমন: চালান নম্বরের সাথে সমন্বয়' 
+                      : 'যেমন: অতিরিক্ত ব্যালেন্স রিফান্ড'
+                  }
+                  className="w-full p-3 rounded-2xl border-2 border-slate-200 text-xs bg-white outline-none focus:border-indigo-600"
+                />
+              </div>
+
+              {/* Calculated New Balance Preview */}
+              {supplierWalletAmount && parseFloat(supplierWalletAmount) > 0 && (
+                <div className="p-3.5 rounded-2xl bg-indigo-50 border border-indigo-200 text-xs flex items-center justify-between text-indigo-900 font-bold">
+                  <span>লেনদেন পরবর্তী নতুন ব্যালেন্স:</span>
+                  <span className="font-mono text-sm font-black text-indigo-700">
+                    ৳{(
+                      supplierWalletActionType !== 'topup' 
+                        ? Math.max(0, (activeSupplier.walletBalance || 0) - (parseFloat(supplierWalletAmount) || 0))
+                        : (activeSupplier.walletBalance || 0) + (parseFloat(supplierWalletAmount) || 0)
+                    ).toLocaleString()}
+                  </span>
+                </div>
+              )}
+
+              <div className="flex items-center gap-3 pt-3">
+                <button
+                  type="button"
+                  onClick={() => setShowSupplierWalletModal(false)}
+                  className="flex-1 py-3.5 rounded-2xl border-2 border-slate-200 text-slate-600 font-black text-xs uppercase hover:bg-slate-50 transition-all"
+                >
+                  বাতিল
+                </button>
+                <button
+                  type="submit"
+                  className={`flex-1 py-3.5 rounded-2xl font-black text-xs uppercase text-white shadow-lg active:scale-95 transition-all flex items-center justify-center gap-2 ${
+                    supplierWalletActionType === 'topup' 
+                      ? 'bg-indigo-600 hover:bg-indigo-500 shadow-indigo-600/30' 
+                      : supplierWalletActionType === 'adjustment_deduct'
+                      ? 'bg-amber-600 hover:bg-amber-500 shadow-amber-600/30'
+                      : 'bg-rose-600 hover:bg-rose-500 shadow-rose-600/30'
+                  }`}
+                >
+                  <Check size={16} /> নিশ্চিত করুন
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}

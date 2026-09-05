@@ -1,6 +1,15 @@
-import React, { useState } from 'react';
-import { User, Package, Heart, Bell, Settings, LogOut, ChevronRight, ShoppingBag, Clock, CheckCircle2, XCircle, Download, TrendingUp, Calendar, CreditCard, ArrowLeft, Gift, Sparkles, RefreshCcw, Award, ShieldCheck, Zap, AlertTriangle } from 'lucide-react';
-import { Customer, Sale, WishlistItem, AppNotification, Product, RankConfig, ShopSettings } from '../../types';
+import React, { useState, useMemo } from 'react';
+import { 
+  User, Package, Heart, Bell, Settings, LogOut, ChevronRight, ShoppingBag, 
+  Clock, CheckCircle2, XCircle, Download, TrendingUp, Calendar, CreditCard, 
+  ArrowLeft, Gift, Sparkles, RefreshCcw, Award, ShieldCheck, Zap, AlertTriangle,
+  Wallet, ArrowUpRight, ArrowDownLeft, Copy, Check, QrCode, Smartphone, 
+  Building2, PlusCircle, AlertCircle, Loader2
+} from 'lucide-react';
+import { 
+  Customer, Sale, WishlistItem, AppNotification, Product, RankConfig, 
+  ShopSettings, WalletTransaction, PaymentGateway, DEFAULT_PAYMENT_GATEWAYS 
+} from '../../types';
 import { motion, AnimatePresence } from 'framer-motion';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 
@@ -12,7 +21,8 @@ interface CustomerProfileProps {
   products: Product[];
   rankConfigs: RankConfig[];
   shopSettings?: ShopSettings;
-  initialTab?: 'overview' | 'orders' | 'wishlist' | 'notifications' | 'settings' | 'lucky';
+  walletTransactions?: WalletTransaction[];
+  initialTab?: 'overview' | 'orders' | 'wallet' | 'wishlist' | 'notifications' | 'settings' | 'lucky';
   onLogout: () => void;
   onClose: () => void;
   onViewOrder: (order: Sale) => void;
@@ -20,6 +30,7 @@ interface CustomerProfileProps {
   onRemoveFromWishlist: (productId: string) => void;
   onAddToCart: (product: Product) => void;
   onUpdateCustomer: (customer: Customer) => void;
+  onTopupRequest?: (tx: Omit<WalletTransaction, 'id' | 'createdAt'>) => Promise<void>;
 }
 
 const CustomerProfile: React.FC<CustomerProfileProps> = ({
@@ -30,6 +41,7 @@ const CustomerProfile: React.FC<CustomerProfileProps> = ({
   products,
   rankConfigs,
   shopSettings,
+  walletTransactions = [],
   initialTab = 'overview',
   onLogout,
   onClose,
@@ -37,11 +49,96 @@ const CustomerProfile: React.FC<CustomerProfileProps> = ({
   onConfirmOrder,
   onRemoveFromWishlist,
   onAddToCart,
-  onUpdateCustomer
+  onUpdateCustomer,
+  onTopupRequest
 }) => {
-  const [activeTab, setActiveTab] = useState<'overview' | 'orders' | 'wishlist' | 'notifications' | 'settings' | 'lucky'>(initialTab);
+  const [activeTab, setActiveTab] = useState<'overview' | 'orders' | 'wallet' | 'wishlist' | 'notifications' | 'settings' | 'lucky'>(initialTab);
   const [isSpinning, setIsSpinning] = useState(false);
   const [reward, setReward] = useState<{ type: string; value: string; code: string } | null>(null);
+
+  // Top-up Modal & Wallet State
+  const [showTopupModal, setShowTopupModal] = useState(false);
+  const [topupAmount, setTopupAmount] = useState<number | ''>(500);
+  const [topupSenderPhone, setTopupSenderPhone] = useState(customer.phone || '');
+  const [topupTrxId, setTopupTrxId] = useState('');
+  const [topupNote, setTopupNote] = useState('');
+  const [isSubmittingTopup, setIsSubmittingTopup] = useState(false);
+  const [copiedId, setCopiedId] = useState<string | null>(null);
+
+  // Available manual gateways for wallet recharge
+  const rechargeGateways: PaymentGateway[] = useMemo(() => {
+    const all = (shopSettings?.paymentGateways && shopSettings.paymentGateways.length > 0) 
+      ? shopSettings.paymentGateways 
+      : DEFAULT_PAYMENT_GATEWAYS;
+    return all.filter(g => g.status === 'active' && g.id !== 'cash_on_delivery' && g.id !== 'rest_pay');
+  }, [shopSettings?.paymentGateways]);
+
+  const [selectedRechargeGatewayId, setSelectedRechargeGatewayId] = useState<string>(() => {
+    return rechargeGateways[0]?.id || 'bkash';
+  });
+
+  const selectedRechargeGateway = useMemo(() => {
+    return rechargeGateways.find(g => g.id === selectedRechargeGatewayId) || rechargeGateways[0];
+  }, [rechargeGateways, selectedRechargeGatewayId]);
+
+  const customerTransactions = useMemo(() => {
+    return walletTransactions
+      .filter(tx => tx.customerId === customer.id)
+      .sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
+  }, [walletTransactions, customer.id]);
+
+  const copyToClipboard = (text: string, id: string) => {
+    navigator.clipboard.writeText(text);
+    setCopiedId(id);
+    setTimeout(() => setCopiedId(null), 2000);
+  };
+
+  const handleTopupSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const amountNum = Number(topupAmount);
+    if (!amountNum || amountNum <= 0) {
+      alert('সঠিক রিচার্জের পরিমাণ লিখুন।');
+      return;
+    }
+    if (!topupSenderPhone) {
+      alert('যে নম্বর থেকে টাকা পাঠিয়েছেন তা লিখুন।');
+      return;
+    }
+    if (!topupTrxId) {
+      alert('ট্রানজেকশন আইডি (TrxID) লিখুন।');
+      return;
+    }
+
+    setIsSubmittingTopup(true);
+    try {
+      if (onTopupRequest) {
+        await onTopupRequest({
+          customerId: customer.id,
+          customerName: customer.name,
+          customerPhone: customer.phone,
+          type: 'topup',
+          amount: amountNum,
+          status: 'pending',
+          gatewayId: selectedRechargeGateway?.id || 'manual',
+          gatewayName: selectedRechargeGateway?.name || 'Mobile Banking',
+          senderNumber: topupSenderPhone,
+          trxId: topupTrxId.toUpperCase().trim(),
+          note: topupNote,
+          balanceBefore: customer.walletBalance || 0,
+          balanceAfter: (customer.walletBalance || 0) + amountNum
+        });
+      }
+      alert('আপনার রিচার্জ অনুরোধ জমা হয়েছে! এডমিন যাচাই করে দ্রুত ব্যালেন্স যুক্ত করে দেবেন।');
+      setShowTopupModal(false);
+      setTopupTrxId('');
+      setTopupNote('');
+    } catch (err) {
+      console.error('Topup error:', err);
+      alert('রিচার্জ অনুরোধ পাঠাতে সমস্যা হয়েছে। আবার চেষ্টা করুন।');
+    } finally {
+      setIsSubmittingTopup(false);
+    }
+  };
 
   const [editName, setEditName] = useState(customer.name);
   const [editNameColor, setEditNameColor] = useState(customer.nameColor || '');
@@ -169,6 +266,7 @@ const CustomerProfile: React.FC<CustomerProfileProps> = ({
           {[
             { id: 'overview', name: 'ওভারভিউ', icon: TrendingUp },
             { id: 'orders', name: 'অর্ডার হিস্ট্রি', icon: ShoppingBag, count: orders.length },
+            { id: 'wallet', name: 'রেস্ট পে ওয়ালেট', icon: Wallet, badge: `৳${(customer.walletBalance || 0).toLocaleString()}` },
             { id: 'lucky', name: 'লাকি রিওয়ার্ড', icon: Gift },
             { id: 'wishlist', name: 'উইশলিস্ট', icon: Heart, count: wishlist.length },
             { id: 'notifications', name: 'নোটিফিকেশন', icon: Bell, count: notifications.filter(n => n.status === 'unread').length },
@@ -183,11 +281,15 @@ const CustomerProfile: React.FC<CustomerProfileProps> = ({
                 <item.icon size={16} className="sm:w-[18px] sm:h-[18px]" />
                 {item.name}
               </div>
-              {item.count !== undefined && item.count > 0 && (
+              {item.badge ? (
+                <span className={`ml-2 px-2 py-0.5 rounded-lg text-[9px] font-black ${activeTab === item.id ? 'bg-white/20 text-white' : 'bg-indigo-50 text-indigo-700'}`}>
+                  {item.badge}
+                </span>
+              ) : item.count !== undefined && item.count > 0 ? (
                 <span className={`ml-2 px-1.5 sm:px-2 py-0.5 sm:py-1 rounded-lg text-[8px] sm:text-[10px] ${activeTab === item.id ? 'bg-white/20 text-white' : 'bg-slate-100 text-slate-500'}`}>
                   {item.count}
                 </span>
-              )}
+              ) : null}
             </button>
           ))}
         </div>
@@ -497,6 +599,177 @@ const CustomerProfile: React.FC<CustomerProfileProps> = ({
                       </div>
                     </div>
                   ))
+                )}
+              </div>
+            </motion.div>
+          )}
+
+          {/* ------------------- REST PAY WALLET TAB ------------------- */}
+          {activeTab === 'wallet' && (
+            <motion.div
+              key="wallet"
+              initial={{ opacity: 0, y: 15 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -15 }}
+              className="space-y-8"
+            >
+              {/* Header */}
+              <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+                <div>
+                  <h2 className="text-2xl sm:text-3xl font-black text-slate-800 tracking-tight flex items-center gap-3">
+                    <Wallet className="text-indigo-600" size={32} /> রেস্ট পে ওয়ালেট (Rest Pay)
+                  </h2>
+                  <p className="text-slate-400 font-bold uppercase tracking-widest text-[10px] sm:text-xs mt-1">
+                    ১-ক্লিক দ্রুত ও ক্যাশব্যাক সমৃদ্ধ সুরক্ষিত স্মার্ট ওয়ালেট
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowTopupModal(true)}
+                  className="bg-indigo-600 hover:bg-indigo-700 text-white px-6 py-3.5 rounded-2xl font-black text-xs uppercase tracking-wider flex items-center gap-2 shadow-lg shadow-indigo-600/20 transition-all hover:scale-102 active:scale-98"
+                >
+                  <PlusCircle size={18} /> টাকা রিচার্জ করুন
+                </button>
+              </div>
+
+              {/* Hero Wallet Card */}
+              <div className="relative overflow-hidden bg-gradient-to-br from-slate-900 via-indigo-950 to-slate-900 rounded-[36px] p-8 sm:p-10 text-white shadow-2xl border border-indigo-500/20">
+                <div className="absolute top-0 right-0 w-96 h-96 bg-indigo-500/10 rounded-full blur-3xl pointer-events-none -mr-20 -mt-20" />
+                <div className="absolute bottom-0 left-0 w-80 h-80 bg-amber-500/10 rounded-full blur-3xl pointer-events-none -ml-20 -mb-20" />
+                
+                <div className="relative z-10 flex flex-col md:flex-row justify-between items-start md:items-center gap-8">
+                  <div className="space-y-4">
+                    <div className="inline-flex items-center gap-2 px-3 py-1 bg-white/10 backdrop-blur-md rounded-full border border-white/15 text-[10px] font-black uppercase tracking-widest text-amber-400">
+                      <Sparkles size={13} /> Rest Pay Digital Account
+                    </div>
+                    <div>
+                      <p className="text-xs font-bold text-slate-400 uppercase tracking-widest">বর্তমান ওয়ালেট ব্যালেন্স</p>
+                      <h3 className="text-4xl sm:text-5xl font-black tracking-tight mt-1 text-white font-mono flex items-baseline gap-1">
+                        <span className="text-amber-400 font-sans text-3xl sm:text-4xl">৳</span>
+                        {(customer.walletBalance || 0).toLocaleString()}
+                      </h3>
+                    </div>
+                    <div className="flex items-center gap-3 text-xs text-slate-300">
+                      <span className="font-mono">{customer.phone}</span>
+                      <span>•</span>
+                      <span className="capitalize font-bold text-emerald-400">অ্যাকাউন্ট স্ট্যাটাস: সচল (Active)</span>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-3 w-full md:w-auto">
+                    <div className="bg-white/5 backdrop-blur-md p-4 rounded-2xl border border-white/10 min-w-[140px]">
+                      <div className="flex items-center gap-2 text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">
+                        <ArrowDownLeft size={14} className="text-emerald-400" /> মোট রিচার্জ
+                      </div>
+                      <p className="text-lg font-black text-emerald-400 font-mono">
+                        ৳{(customer.totalWalletTopup || 0).toLocaleString()}
+                      </p>
+                    </div>
+
+                    <div className="bg-white/5 backdrop-blur-md p-4 rounded-2xl border border-white/10 min-w-[140px]">
+                      <div className="flex items-center gap-2 text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">
+                        <ArrowUpRight size={14} className="text-rose-400" /> মোট খরচ
+                      </div>
+                      <p className="text-lg font-black text-rose-400 font-mono">
+                        ৳{(customer.totalWalletSpent || 0).toLocaleString()}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Benefits Banner */}
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                <div className="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm flex items-start gap-3.5">
+                  <div className="p-2.5 bg-indigo-50 text-indigo-600 rounded-xl shrink-0">
+                    <Zap size={20} />
+                  </div>
+                  <div>
+                    <h4 className="text-xs font-black text-slate-800">১-ক্লিক সুপারফাস্ট চেকআউট</h4>
+                    <p className="text-[11px] text-slate-500 mt-0.5 leading-relaxed">ওটিপি বা অতিরিক্ত পেমেন্ট গেটওয়ে লোডিং ছাড়াই তাৎক্ষণিক অর্ডার সম্পন্ন।</p>
+                  </div>
+                </div>
+
+                <div className="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm flex items-start gap-3.5">
+                  <div className="p-2.5 bg-amber-50 text-amber-600 rounded-xl shrink-0">
+                    <Sparkles size={20} />
+                  </div>
+                  <div>
+                    <h4 className="text-xs font-black text-slate-800">{shopSettings?.walletSettings?.cashbackPercentage || 2}% নিশ্চিত ক্যাশব্যাক</h4>
+                    <p className="text-[11px] text-slate-500 mt-0.5 leading-relaxed">প্রতিবার রেস্ট পে ওয়ালেট দিয়ে অর্ডারে স্বয়ংক্রিয় ক্যাশব্যাক জমা হবে।</p>
+                  </div>
+                </div>
+
+                <div className="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm flex items-start gap-3.5">
+                  <div className="p-2.5 bg-emerald-50 text-emerald-600 rounded-xl shrink-0">
+                    <ShieldCheck size={20} />
+                  </div>
+                  <div>
+                    <h4 className="text-xs font-black text-slate-800">১০০% নিরাপদ ও সুরক্ষিত</h4>
+                    <p className="text-[11px] text-slate-500 mt-0.5 leading-relaxed">সম্পূর্ণ এনক্রিপ্টেড লেজার এবং রিয়েল-টাইম ব্যালেন্স ট্র্যাকিং।</p>
+                  </div>
+                </div>
+              </div>
+
+              {/* Transaction History */}
+              <div className="bg-white rounded-[32px] p-6 sm:p-8 border border-slate-100 shadow-sm space-y-6">
+                <div className="flex justify-between items-center border-b pb-4">
+                  <h3 className="font-black text-slate-800 text-lg">লেনদেন ইতিহাস (Transactions)</h3>
+                  <span className="text-xs font-bold text-slate-400">{customerTransactions.length}টি লেনদেন</span>
+                </div>
+
+                {customerTransactions.length === 0 ? (
+                  <div className="text-center py-12 text-slate-400">
+                    <Wallet size={48} className="mx-auto mb-3 opacity-30" />
+                    <p className="text-sm font-bold">এখনো কোনো ওয়ালেট লেনদেন হয়নি</p>
+                    <p className="text-xs text-slate-400 mt-1">টাকা রিচার্জ করুন অথবা ওয়ালেট দিয়ে কেনাকাটা শুরু করুন।</p>
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    {customerTransactions.map((tx) => {
+                      const isCredit = tx.type === 'topup' || tx.type === 'cashback' || tx.type === 'bonus' || (tx.type === 'adjustment' && tx.amount > 0);
+                      return (
+                        <div key={tx.id} className="flex items-center justify-between p-4 bg-slate-50 hover:bg-slate-100/80 rounded-2xl transition-all border border-slate-100">
+                          <div className="flex items-center gap-3.5">
+                            <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${isCredit ? 'bg-emerald-100 text-emerald-700' : 'bg-rose-100 text-rose-700'}`}>
+                              {isCredit ? <ArrowDownLeft size={20} /> : <ArrowUpRight size={20} />}
+                            </div>
+                            <div>
+                              <div className="flex items-center gap-2">
+                                <h4 className="font-black text-xs sm:text-sm text-slate-800">
+                                  {tx.type === 'topup' ? 'টাকা রিচার্জ (Top-up)' :
+                                   tx.type === 'purchase' ? 'অর্ডার পেমেন্ট (Purchase)' :
+                                   tx.type === 'cashback' ? 'ক্যাশব্যাক রিওয়ার্ড' :
+                                   tx.type === 'bonus' ? 'বোনাস ক্রেডিট' :
+                                   tx.type === 'refund' ? 'অর্ডার রিফান্ড' : 'ব্যালেন্স অ্যাডজাস্টমেন্ট'}
+                                </h4>
+                                <span className={`text-[9px] font-black uppercase px-2 py-0.5 rounded-md ${
+                                  tx.status === 'approved' ? 'bg-emerald-100 text-emerald-800' :
+                                  tx.status === 'pending' ? 'bg-amber-100 text-amber-800' : 'bg-rose-100 text-rose-800'
+                                }`}>
+                                  {tx.status === 'approved' ? 'সফল' : tx.status === 'pending' ? 'অপেক্ষমাণ' : 'বাতিল'}
+                                </span>
+                              </div>
+                              <p className="text-[10px] text-slate-400 font-bold mt-0.5">
+                                {new Date(tx.createdAt).toLocaleString('bn-BD', { dateStyle: 'medium', timeStyle: 'short' })}
+                                {tx.gatewayName ? ` • ${tx.gatewayName}` : ''}
+                                {tx.trxId ? ` • TrxID: ${tx.trxId}` : ''}
+                              </p>
+                            </div>
+                          </div>
+
+                          <div className="text-right">
+                            <p className={`font-mono font-black text-sm sm:text-base ${isCredit ? 'text-emerald-600' : 'text-slate-800'}`}>
+                              {isCredit ? '+' : '-'}৳{tx.amount.toLocaleString()}
+                            </p>
+                            <p className="text-[9px] text-slate-400 font-mono mt-0.5">
+                              ব্যালেন্স: ৳{(tx.balanceAfter ?? 0).toLocaleString()}
+                            </p>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
                 )}
               </div>
             </motion.div>
@@ -1052,6 +1325,203 @@ const CustomerProfile: React.FC<CustomerProfileProps> = ({
           )}
         </AnimatePresence>
       </div>
+
+      {/* ----------------- Top-up Recharge Modal ----------------- */}
+      <AnimatePresence>
+        {showTopupModal && (
+          <div className="fixed inset-0 z-[200] flex items-center justify-center p-4">
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setShowTopupModal(false)}
+              className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+            />
+
+            <motion.div
+              initial={{ scale: 0.9, opacity: 0, y: 20 }}
+              animate={{ scale: 1, opacity: 1, y: 0 }}
+              exit={{ scale: 0.9, opacity: 0, y: 20 }}
+              className="relative bg-white rounded-[36px] shadow-2xl w-full max-w-lg overflow-hidden flex flex-col max-h-[90vh]"
+            >
+              <div className="p-6 bg-gradient-to-r from-indigo-900 to-slate-900 text-white flex justify-between items-center">
+                <div className="flex items-center gap-3">
+                  <div className="p-2.5 bg-white/10 rounded-2xl">
+                    <Wallet size={24} className="text-amber-400" />
+                  </div>
+                  <div>
+                    <h3 className="font-black text-lg">ওয়ালেট ব্যালেন্স রিচার্জ</h3>
+                    <p className="text-[10px] text-indigo-200 font-bold uppercase tracking-widest">বিকাশ / নগদ / রকেট দিয়ে অ্যাড মানি</p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowTopupModal(false)}
+                  className="p-2 rounded-xl bg-white/10 hover:bg-white/20 text-white transition-colors"
+                >
+                  <ArrowLeft size={18} />
+                </button>
+              </div>
+
+              <form onSubmit={handleTopupSubmit} className="p-6 overflow-y-auto custom-scrollbar space-y-6">
+                {/* Step 1: Select Gateway */}
+                <div className="space-y-2">
+                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">
+                    ১. যে মাধ্যমে টাকা পাঠাবেন (Select Payment Method)
+                  </label>
+                  <div className="grid grid-cols-3 gap-2">
+                    {rechargeGateways.map((gw) => (
+                      <button
+                        key={gw.id}
+                        type="button"
+                        onClick={() => setSelectedRechargeGatewayId(gw.id)}
+                        className={`p-3 rounded-2xl border-2 text-center transition-all ${
+                          selectedRechargeGatewayId === gw.id
+                            ? 'border-indigo-600 bg-indigo-50/60 font-black text-indigo-900 shadow-xs'
+                            : 'border-slate-100 hover:border-slate-200 bg-slate-50 text-slate-600'
+                        }`}
+                      >
+                        <p className="text-xs font-black">{gw.name}</p>
+                        <p className="text-[8px] text-slate-400 uppercase mt-0.5">{gw.accountType || 'Personal'}</p>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Gateway Detail & Instructions */}
+                {selectedRechargeGateway && (
+                  <div className="p-4 bg-slate-50 rounded-2xl border border-slate-200 space-y-3">
+                    <div className="flex justify-between items-center">
+                      <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">
+                        {selectedRechargeGateway.accountType === 'merchant' ? 'মার্চেন্ট নম্বর (Payment)' : 'পার্সোনাল নম্বর (Send Money)'}
+                      </span>
+                      <span className="text-[9px] font-black bg-indigo-100 text-indigo-800 px-2 py-0.5 rounded-md uppercase">
+                        {selectedRechargeGateway.accountType || 'Personal'}
+                      </span>
+                    </div>
+
+                    {selectedRechargeGateway.number && (
+                      <div className="flex items-center justify-between bg-white p-3 rounded-xl border border-slate-200">
+                        <span className="font-mono font-black text-base text-slate-900">{selectedRechargeGateway.number}</span>
+                        <button
+                          type="button"
+                          onClick={() => copyToClipboard(selectedRechargeGateway.number || '', selectedRechargeGateway.id)}
+                          className="px-3 py-1 bg-slate-100 hover:bg-slate-200 rounded-lg text-xs font-black text-slate-700 flex items-center gap-1.5 transition-colors"
+                        >
+                          {copiedId === selectedRechargeGateway.id ? <Check size={14} className="text-emerald-600"/> : <Copy size={14}/>}
+                          {copiedId === selectedRechargeGateway.id ? 'কপি হয়েছে' : 'কপি করুন'}
+                        </button>
+                      </div>
+                    )}
+
+                    {selectedRechargeGateway.bankDetails && selectedRechargeGateway.bankDetails.bankName && (
+                      <div className="bg-white p-3 rounded-xl border border-slate-200 text-xs space-y-1">
+                        <p className="font-black text-slate-800">{selectedRechargeGateway.bankDetails.bankName}</p>
+                        <p className="text-slate-600">হিসাব নম্বর: <span className="font-mono font-bold">{selectedRechargeGateway.bankDetails.accountNumber}</span></p>
+                        <p className="text-[10px] text-slate-400">নাম: {selectedRechargeGateway.bankDetails.accountName}, শাখা: {selectedRechargeGateway.bankDetails.branchName}</p>
+                      </div>
+                    )}
+
+                    {selectedRechargeGateway.instructions && (
+                      <p className="text-[11px] text-slate-600 font-bold bg-amber-50/70 p-2.5 rounded-xl border border-amber-100">
+                        📌 {selectedRechargeGateway.instructions}
+                      </p>
+                    )}
+                  </div>
+                )}
+
+                {/* Amount Selection */}
+                <div className="space-y-2">
+                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">
+                    ২. টাকার পরিমাণ (Recharge Amount)
+                  </label>
+                  <div className="flex gap-2">
+                    {[100, 500, 1000, 2000, 5000].map((amt) => (
+                      <button
+                        key={amt}
+                        type="button"
+                        onClick={() => setTopupAmount(amt)}
+                        className={`px-3 py-1.5 rounded-xl text-xs font-black transition-all ${
+                          topupAmount === amt
+                            ? 'bg-indigo-600 text-white shadow-xs'
+                            : 'bg-slate-100 hover:bg-slate-200 text-slate-700'
+                        }`}
+                      >
+                        ৳{amt}
+                      </button>
+                    ))}
+                  </div>
+                  <div className="relative mt-2">
+                    <span className="absolute left-4 top-3.5 text-slate-400 font-black text-base">৳</span>
+                    <input
+                      type="number"
+                      required
+                      min={shopSettings?.walletSettings?.minTopupAmount || 50}
+                      max={shopSettings?.walletSettings?.maxTopupAmount || 50000}
+                      className="w-full border-2 border-slate-100 rounded-2xl pl-10 pr-4 py-3 text-sm font-black font-mono bg-slate-50 outline-none focus:bg-white focus:border-indigo-600 transition-all"
+                      placeholder="পরিমাণ লিখুন"
+                      value={topupAmount}
+                      onChange={e => setTopupAmount(e.target.value === '' ? '' : Number(e.target.value))}
+                    />
+                  </div>
+                </div>
+
+                {/* Sender & TrxID */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div className="space-y-1.5">
+                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">
+                      ৩. যে নম্বর থেকে পাঠিয়েছেন
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      className="w-full border-2 border-slate-100 rounded-2xl p-3.5 text-xs font-black bg-slate-50 outline-none focus:bg-white focus:border-indigo-600"
+                      placeholder="017XXXXXXXX"
+                      value={topupSenderPhone}
+                      onChange={e => setTopupSenderPhone(e.target.value)}
+                    />
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">
+                      ৪. Transaction ID (TrxID)
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      className="w-full border-2 border-slate-100 rounded-2xl p-3.5 text-xs font-black font-mono uppercase bg-slate-50 outline-none focus:bg-white focus:border-indigo-600"
+                      placeholder="e.g. 9B4F81A..."
+                      value={topupTrxId}
+                      onChange={e => setTopupTrxId(e.target.value)}
+                    />
+                  </div>
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">
+                    নোট (ঐচ্ছিক)
+                  </label>
+                  <input
+                    type="text"
+                    className="w-full border-2 border-slate-100 rounded-2xl px-4 py-3 text-xs font-bold bg-slate-50 outline-none focus:bg-white focus:border-indigo-600"
+                    placeholder="কোনো বার্তা থাকলে লিখুন"
+                    value={topupNote}
+                    onChange={e => setTopupNote(e.target.value)}
+                  />
+                </div>
+
+                <button
+                  type="submit"
+                  disabled={isSubmittingTopup || !topupAmount || !topupSenderPhone || !topupTrxId}
+                  className="w-full bg-indigo-600 hover:bg-indigo-700 disabled:bg-slate-200 text-white py-4 rounded-2xl font-black text-xs uppercase tracking-widest shadow-xl shadow-indigo-600/20 flex items-center justify-center gap-2 transition-all hover:scale-101 active:scale-98"
+                >
+                  {isSubmittingTopup ? <Loader2 className="animate-spin" size={18} /> : 'রিচার্জ অনুরোধ জমা দিন'}
+                </button>
+              </form>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
     </div>
   );
 };

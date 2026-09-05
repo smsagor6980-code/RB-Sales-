@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from 'react';
-import { Staff, ProductCategory, RankConfig, AppRole } from '../types';
+import { Staff, ProductCategory, RankConfig, AppRole, Customer, WalletTransaction, CompanyBranch } from '../types';
 import { auth, db, rtdb } from '../services/firebase';
 import { sendPasswordResetEmail } from 'firebase/auth';
 import { ref, get } from 'firebase/database';
@@ -11,9 +11,11 @@ import {
   Check, AlertCircle, Eye, EyeOff, Building2, UserCircle, Settings2,
   Store, MapPin, Database, RefreshCcw, Target, Percent, Briefcase,
   Unlock, ShieldAlert, Laptop, Layout, Users, Coins, ShoppingBag, Image, Bell, Truck,
-  ArrowDownToLine, CloudDownload, Zap, Camera, Upload, Palette, Type
+  ArrowDownToLine, CloudDownload, Zap, Camera, Upload, Palette, Type, Wallet, CreditCard
 } from 'lucide-react';
 import { HEADER_COLOR_PRESETS, HEADER_TEXT_COLOR_PRESETS, HEADER_SUBTITLE_COLOR_PRESETS } from './Layout';
+import { PaymentGatewayManager } from './PaymentGatewayManager';
+import { AuthSecurityManager } from './AuthSecurityManager';
 
 interface SettingsProps {
   staff: Staff[];
@@ -25,6 +27,15 @@ interface SettingsProps {
   onUpdateRanks: (ranks: RankConfig[]) => void;
   shopSettings: any;
   onUpdateShopSettings: (settings: any) => void;
+  customers?: Customer[];
+  onUpdateCustomers?: (customers: Customer[]) => void;
+  walletTransactions?: WalletTransaction[];
+  onUpdateWalletTransactions?: (transactions: WalletTransaction[]) => void;
+  companies?: CompanyBranch[];
+  onSaveCompany?: (company: CompanyBranch) => Promise<void> | void;
+  onDeleteCompany?: (companyId: string) => Promise<void> | void;
+  onNavigateToCompanies?: () => void;
+  currentStaff?: Staff | null;
   onBackup?: () => void;
   onRestore?: (data: any) => void;
   isAdmin?: boolean;
@@ -35,9 +46,16 @@ const Settings: React.FC<SettingsProps> = ({
   roles, onUpdateRoles, 
   categories = [], rankConfigs, onUpdateRanks,
   shopSettings, onUpdateShopSettings,
+  customers = [], onUpdateCustomers = () => {},
+  walletTransactions = [], onUpdateWalletTransactions = () => {},
+  companies = [],
+  onSaveCompany,
+  onDeleteCompany,
+  onNavigateToCompanies,
+  currentStaff,
   onBackup, onRestore, isAdmin
 }) => {
-  const [activeTab, setActiveTab] = useState<'users' | 'roles' | 'ranks' | 'general' | 'ecommerce' | 'rewards' | 'backup' | 'migration'>('users');
+  const [activeTab, setActiveTab] = useState<'users' | 'roles' | 'ranks' | 'general' | 'ecommerce' | 'payments' | 'rewards' | 'backup' | 'migration' | 'auth_security'>('auth_security');
   const [showUserModal, setShowUserModal] = useState(false);
   const [showRoleModal, setShowRoleModal] = useState(false);
   const [showRankModal, setShowRankModal] = useState(false);
@@ -450,11 +468,13 @@ const Settings: React.FC<SettingsProps> = ({
         
         <div className="flex bg-white p-2 rounded-[28px] border-2 border-slate-100 shadow-sm w-full md:w-auto overflow-x-auto no-scrollbar">
           {[
+            { id: 'auth_security', label: 'অথ ও অফিস কন্ট্রোল (Auth & Offices)', icon: ShieldCheck },
             { id: 'users', label: 'Staff', icon: Users },
             { id: 'roles', label: 'Access', icon: Shield },
             { id: 'ranks', label: 'Loyalty', icon: Crown },
             { id: 'rewards', label: 'Rewards', icon: Gift },
             { id: 'ecommerce', label: 'Shop', icon: ShoppingBag },
+            { id: 'payments', label: 'Merchant & Wallet (মার্চেন্ট নম্বর)', icon: Wallet },
             { id: 'general', label: 'System', icon: Store },
             { id: 'backup', label: 'Backup', icon: Database },
             { id: 'migration', label: 'Migration', icon: CloudDownload }
@@ -980,6 +1000,28 @@ const Settings: React.FC<SettingsProps> = ({
             </div>
 
             <div className="p-12 space-y-12">
+              {/* Quick Link to Merchant Numbers */}
+              <div className="p-6 rounded-[32px] bg-gradient-to-r from-indigo-900 to-slate-900 text-white flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 border border-indigo-500/30 shadow-xl">
+                <div className="flex items-center gap-4">
+                  <div className="w-12 h-12 rounded-2xl bg-amber-400 text-slate-950 flex items-center justify-center font-black shrink-0">
+                    <Wallet size={24} />
+                  </div>
+                  <div>
+                    <h4 className="text-sm font-black uppercase text-white">মার্চেন্ট নম্বর ও পেমেন্ট গেটওয়ে কন্ট্রোল</h4>
+                    <p className="text-[11px] font-bold text-slate-300">
+                      বিকাশ, নগদ, রকেট, উপায় ও ব্যাংকের মার্চেন্ট নম্বর এবং একাউন্ট টাইপ সেট করতে চান?
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setActiveTab('payments')}
+                  className="px-5 py-3 bg-amber-400 hover:bg-amber-300 text-slate-950 rounded-2xl font-black text-xs uppercase tracking-wider whitespace-nowrap active:scale-95 transition-all shadow-md"
+                >
+                  মার্চেন্ট নম্বর সেট করুন →
+                </button>
+              </div>
+
               {/* Hero Section Config */}
               <div className="space-y-8">
                 <h4 className="text-[11px] font-black text-slate-900 uppercase tracking-widest border-b pb-2 flex items-center gap-2"><Image size={14}/> Hero Section Configuration</h4>
@@ -1733,6 +1775,21 @@ const Settings: React.FC<SettingsProps> = ({
         </div>
       )}
 
+      {/* ----------------- Auth & Office Security Control Tab ----------------- */}
+      {activeTab === 'auth_security' && (
+        <AuthSecurityManager
+          shopSettings={shopSettings}
+          onUpdateShopSettings={onUpdateShopSettings}
+          customers={customers}
+          onUpdateCustomers={onUpdateCustomers}
+          companies={companies}
+          onSaveCompany={onSaveCompany}
+          onDeleteCompany={onDeleteCompany}
+          onNavigateToCompanies={onNavigateToCompanies}
+          isAdmin={isAdmin}
+        />
+      )}
+
       {/* ----------------- Modals ----------------- */}
 
       {/* Staff Modal */}
@@ -2065,6 +2122,23 @@ const Settings: React.FC<SettingsProps> = ({
             </div>
           </div>
         </div>
+      )}
+
+      {/* ----------------- Payments & Wallet Tab ----------------- */}
+      {activeTab === 'payments' && (
+        <PaymentGatewayManager
+          shopSettings={shopData}
+          onUpdateShopSettings={(updated) => {
+            setShopData(updated);
+            onUpdateShopSettings(updated);
+          }}
+          customers={customers}
+          onUpdateCustomers={onUpdateCustomers}
+          walletTransactions={walletTransactions}
+          onUpdateWalletTransactions={onUpdateWalletTransactions}
+          currentStaff={currentStaff}
+          isAdmin={isAdmin}
+        />
       )}
     </div>
   );

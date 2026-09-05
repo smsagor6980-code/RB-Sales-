@@ -17,6 +17,7 @@ import {
   ResponsiveContainer, AreaChart, Area, Cell, Legend,
   PieChart as RePieChart, Pie
 } from 'recharts';
+import { getLocalDateString, getLocalFirstDayOfMonth, normalizeDate, formatDisplayDate } from '../services/dateUtils';
 
 interface ReportsProps {
   sales: Sale[];
@@ -73,19 +74,8 @@ const Reports: React.FC<ReportsProps> = ({
   const [showDeliverySplitModal, setShowDeliverySplitModal] = useState(false);
   const [deliveryTargetSale, setDeliveryTargetSale] = useState<Sale | null>(null);
   
-  const getToday = () => new Date().toISOString().split('T')[0];
-  const getFirstOfMonth = () => {
-    const d = new Date();
-    return new Date(d.getFullYear(), d.getMonth(), 1).toISOString().split('T')[0];
-  };
-
-  const [startDate, setStartDate] = useState(getFirstOfMonth());
-  const [endDate, setEndDate] = useState(getToday());
-
-  const normalizeDate = (dateStr: string) => {
-    if (!dateStr) return '';
-    return dateStr.includes('T') ? dateStr.split('T')[0] : dateStr;
-  };
+  const [startDate, setStartDate] = useState(() => getLocalFirstDayOfMonth());
+  const [endDate, setEndDate] = useState(() => getLocalDateString());
 
   // 1. Unified Filtered Data with Permissions
   const filteredSales = useMemo(() => {

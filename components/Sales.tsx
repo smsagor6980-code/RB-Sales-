@@ -11,6 +11,7 @@ import {
   Share2, Download, CheckCircle2, AlertTriangle, Building2, Clock, MessageCircle,
   Calendar, Package, Truck
 } from 'lucide-react';
+import { getLocalDateString } from '../services/dateUtils';
 
 interface SalesProps {
   products: Product[];
@@ -28,6 +29,7 @@ interface SalesProps {
 const Sales: React.FC<SalesProps> = ({ products, customers, sales, onSaleComplete, onAddReturn, onSplitDelivery, staff, isAdmin, currentStaff, shopSettings }) => {
   const [cart, setCart] = useState<CartItem[]>([]);
   const [selectedCustomerId, setSelectedCustomerId] = useState<string>('');
+  const [saleDate, setSaleDate] = useState<string>(() => getLocalDateString());
   const [customerSearch, setCustomerSearch] = useState('');
   const [productSearch, setProductSearch] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('all');
@@ -158,7 +160,7 @@ const Sales: React.FC<SalesProps> = ({ products, customers, sales, onSaleComplet
       alert("বাকি বিক্রির ক্ষেত্রে কাস্টমার সিলেক্ট করা বাধ্যতামূলক।");
       return;
     }
-    const localDate = new Date().toISOString().split('T')[0];
+    const localDate = saleDate || getLocalDateString();
     const invoiceNo = `INV-${Date.now().toString().slice(-6)}`;
     const newSale: Sale = {
       id: Date.now().toString(),
@@ -268,14 +270,33 @@ const Sales: React.FC<SalesProps> = ({ products, customers, sales, onSaleComplet
       <div className="flex flex-col sm:flex-row justify-between items-center gap-4 bg-white p-4 rounded-3xl border-2 border-slate-100 shadow-sm">
         <div className="flex items-center gap-3">
            <div className="bg-primary p-2.5 rounded-xl text-white shadow-lg"><ShoppingCart size={22}/></div>
-           <h2 className="font-black text-slate-900 uppercase tracking-tight">Point of Sale</h2>
+           <div>
+             <h2 className="font-black text-slate-900 uppercase tracking-tight">Point of Sale</h2>
+             <p className="text-[10px] font-bold text-slate-400">দ্রুত বিক্রয় ও ইনভয়েস জেনারেটর</p>
+           </div>
         </div>
-        <button 
-          onClick={() => setShowReturnModal(true)}
-          className="flex items-center gap-2 bg-rose-50 text-rose-600 px-6 py-3 rounded-2xl font-black text-xs uppercase tracking-widest hover:bg-rose-100 transition-all active:scale-95 border-2 border-rose-100 shadow-sm"
-        >
-          <RotateCcw size={18}/> Return Items
-        </button>
+
+        <div className="flex items-center gap-3 w-full sm:w-auto justify-between sm:justify-end">
+          <div className="flex items-center gap-2 bg-slate-50 px-3.5 py-2 rounded-2xl border border-slate-200 shadow-2xs">
+            <Calendar size={15} className="text-primary shrink-0" />
+            <div className="flex flex-col">
+              <span className="text-[9px] font-black text-slate-400 uppercase tracking-wider leading-none">তারিখ (Date)</span>
+              <input 
+                type="date" 
+                value={saleDate} 
+                onChange={(e) => setSaleDate(e.target.value)}
+                className="font-black text-xs text-slate-800 outline-none bg-transparent cursor-pointer mt-0.5"
+              />
+            </div>
+          </div>
+
+          <button 
+            onClick={() => setShowReturnModal(true)}
+            className="flex items-center gap-2 bg-rose-50 text-rose-600 px-5 py-3 rounded-2xl font-black text-xs uppercase tracking-widest hover:bg-rose-100 transition-all active:scale-95 border-2 border-rose-100 shadow-sm"
+          >
+            <RotateCcw size={18}/> Return Items
+          </button>
+        </div>
       </div>
 
       <div className="lg:hidden flex bg-white p-1.5 rounded-[24px] border-2 border-slate-100 shadow-sm sticky top-0 z-40">
@@ -772,7 +793,7 @@ const Sales: React.FC<SalesProps> = ({ products, customers, sales, onSaleComplet
                                                   amount: qty * item.unitPrice,
                                                   reason: 'Customer Return',
                                                   type: 'return',
-                                                  date: new Date().toISOString().split('T')[0],
+                                                  date: getLocalDateString(),
                                                   staffName: currentStaff?.name || 'Admin',
                                                   addedBy: currentStaff?.id
                                                });

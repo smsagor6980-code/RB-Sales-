@@ -181,6 +181,10 @@ service cloud.firestore {
       allow read, write: if isApprovedStaff();
     }
 
+    match /supplier_returns/{returnId} {
+      allow read, write: if isApprovedStaff();
+    }
+
     match /attendances/{attendanceId} {
       allow read: if isApprovedStaff() || isAdmin();
       allow write: if isApprovedStaff() || isAdmin();
@@ -220,6 +224,11 @@ service cloud.firestore {
       allow read, write: if isApprovedStaff();
     }
     
+    match /companies/{companyId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+    
     match /settings/{settingId} {
       allow read: if true;
       allow write: if isAdmin();
@@ -235,6 +244,12 @@ service cloud.firestore {
       allow list: if isApprovedStaff();
       allow create: if isApprovedStaff() && isValidId(entryId) && isValidStockEntry(request.resource.data);
       allow update, delete: if isAdmin() && isValidId(entryId);
+    }
+
+    match /wallet_transactions/{transactionId} {
+      allow read: if isApprovedStaff() || (isAuthenticated() && resource.data.customerId == request.auth.uid);
+      allow create: if isAuthenticated();
+      allow update, delete: if isApprovedStaff();
     }
   }
 }

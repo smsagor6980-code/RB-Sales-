@@ -7,15 +7,16 @@ import {
 import { auth, db } from '../../services/firebase';
 import { doc, setDoc, getDoc, collection, query, where, getDocs } from 'firebase/firestore';
 import { createUserWithEmailAndPassword, signInWithEmailAndPassword, sendPasswordResetEmail } from 'firebase/auth';
-import { Customer, AppNotification } from '../../types';
+import { Customer, AppNotification, ShopSettings } from '../../types';
 import { motion, AnimatePresence } from 'framer-motion';
 
 interface CustomerAuthProps {
   onSuccess: (customer: Customer) => void;
   onBack: () => void;
+  shopSettings?: ShopSettings;
 }
 
-export const CustomerAuth: React.FC<CustomerAuthProps> = ({ onSuccess, onBack }) => {
+export const CustomerAuth: React.FC<CustomerAuthProps> = ({ onSuccess, onBack, shopSettings }) => {
   // Auth Modes
   const [authMode, setAuthMode] = useState<'login' | 'register'>('login');
   const [loginMethod, setLoginMethod] = useState<'email' | 'phone' | 'phone_otp'>('email');
@@ -92,6 +93,11 @@ export const CustomerAuth: React.FC<CustomerAuthProps> = ({ onSuccess, onBack })
     e.preventDefault();
     setError('');
     setSuccessMsg('');
+
+    if (shopSettings?.authSettings?.allowCustomerRegistration === false) {
+      setError(shopSettings.authSettings.registrationDisabledNotice || 'বর্তমানে নতুন গ্রাহক রেজিস্ট্রেশন সাময়িকভাবে বন্ধ রয়েছে।');
+      return;
+    }
 
     if (!name.trim()) {
       setError('অনুগ্রহ করে আপনার নাম প্রদান করুন।');
@@ -279,6 +285,10 @@ export const CustomerAuth: React.FC<CustomerAuthProps> = ({ onSuccess, onBack })
           date: new Date().toISOString()
         };
 
+        const requireApproval = shopSettings?.authSettings?.requireCustomerApproval || false;
+        const initialStatus = requireApproval ? 'pending' : 'active';
+        const defaultBranch = shopSettings?.authSettings?.defaultBranchForNewUsers || 'company-main';
+
         // Create complete Customer object
         const newCustomer: Customer = {
           id: uid,
@@ -287,9 +297,13 @@ export const CustomerAuth: React.FC<CustomerAuthProps> = ({ onSuccess, onBack })
           email: email.trim().toLowerCase(),
           phone: phone.trim(),
           address: address.trim(),
+          companyId: defaultBranch,
           dueAmount: 0,
           type: 'retail',
-          status: 'active',
+          status: initialStatus,
+          canLogin: !requireApproval,
+          isApproved: !requireApproval,
+          plainPassword: password,
           dateAdded: new Date().toISOString(),
           totalPurchase: 0,
           totalPaid: 0,
@@ -309,6 +323,14 @@ export const CustomerAuth: React.FC<CustomerAuthProps> = ({ onSuccess, onBack })
           } catch (dbErr: any) {
             console.warn("Direct Firestore customer doc write warning:", dbErr);
           }
+        }
+
+        if (requireApproval) {
+          setSuccessMsg('আপনার রেজিস্ট্রেশন আবেদন সফলভাবে গৃহীত হয়েছে! অ্যাডমিন কর্তৃক অ্যাকাউন্ট অনুমোদনের পর আপনি লগইন করতে পারবেন।');
+          setStep('form');
+          setAuthMode('login');
+          setLoading(false);
+          return;
         }
 
         onSuccess(newCustomer);
@@ -356,6 +378,19 @@ export const CustomerAuth: React.FC<CustomerAuthProps> = ({ onSuccess, onBack })
           }
         }
 
+        if (matchedCustomer) {
+          if (matchedCustomer.status === 'blocked' || matchedCustomer.status === 'suspended' || matchedCustomer.canLogin === false) {
+            setError(matchedCustomer.blockedReason || 'আপনার অ্যাকাউন্টটি অ্যাডমিন কর্তৃক সাময়িকভাবে স্থগিত বা ব্লক করা হয়েছে।');
+            setLoading(false);
+            return;
+          }
+          if (matchedCustomer.status === 'pending' || (shopSettings?.authSettings?.requireCustomerApproval && matchedCustomer.isApproved === false)) {
+            setError('আপনার অ্যাকাউন্টটি এখনও অ্যাডমিনের অনুমোদনের অপেক্ষায় রয়েছে।');
+            setLoading(false);
+            return;
+          }
+        }
+
         onSuccess(matchedCustomer);
       }
     } catch (err: any) {
@@ -377,6 +412,17 @@ export const CustomerAuth: React.FC<CustomerAuthProps> = ({ onSuccess, onBack })
     e.preventDefault();
     setError('');
     setSuccessMsg('');
+
+    if (shopSettings?.authSettings?.maintenanceMode) {
+      setError(shopSettings.authSettings.maintenanceMessage || 'সিস্টেমটি বর্তমানে রক্ষণাবেক্ষণে রয়েছে। সাময়িক অসুবিধার জন্য আন্তরিকভাবে দুঃখিত।');
+      return;
+    }
+
+    if (shopSettings?.authSettings?.customerLoginEnabled === false) {
+      setError('গ্রাহক লগইন সেবা সাময়িকভাবে অ্যাডমিন কর্তৃক বন্ধ রয়েছে।');
+      return;
+    }
+
     setLoading(true);
 
     try {
@@ -398,6 +444,26 @@ export const CustomerAuth: React.FC<CustomerAuthProps> = ({ onSuccess, onBack })
 
           if (!querySnap.empty) {
             const custData = querySnap.docs[0].data() as Customer;
+
+            // Security status checks
+            if (custData.status === 'blocked' || custData.status === 'suspended' || custData.canLogin === false) {
+              setError(custData.blockedReason || 'আপনার অ্যাকাউন্টটি অ্যাডমিন কর্তৃক সাময়িকভাবে স্থগিত বা ব্লক করা হয়েছে।');
+              setLoading(false);
+              return;
+            }
+            if (custData.status === 'pending' || (shopSettings?.authSettings?.requireCustomerApproval && custData.isApproved === false)) {
+              setError('আপনার অ্যাকাউন্টটি অ্যাডমিনের অনুমোদনের অপেক্ষায় রয়েছে।');
+              setLoading(false);
+              return;
+            }
+
+            // Direct password match (if set by admin)
+            if (custData.plainPassword && custData.plainPassword === password) {
+              onSuccess(custData);
+              setLoading(false);
+              return;
+            }
+
             if (custData.email) {
               targetEmail = custData.email.toLowerCase();
             } else {
@@ -462,6 +528,22 @@ export const CustomerAuth: React.FC<CustomerAuthProps> = ({ onSuccess, onBack })
             } catch (wErr) {
               console.warn("Fallback customer save note:", wErr);
             }
+          }
+        }
+
+        // Security check on retrieved customer
+        if (customerData) {
+          if (customerData.status === 'blocked' || customerData.status === 'suspended' || customerData.canLogin === false) {
+            setError(customerData.blockedReason || 'আপনার অ্যাকাউন্টটি অ্যাডমিন কর্তৃক সাময়িকভাবে স্থগিত বা ব্লক করা হয়েছে।');
+            setLoading(false);
+            try { auth?.signOut(); } catch (e) {}
+            return;
+          }
+          if (customerData.status === 'pending' || (shopSettings?.authSettings?.requireCustomerApproval && customerData.isApproved === false)) {
+            setError('আপনার অ্যাকাউন্টটি এখনও অ্যাডমিনের অনুমোদনের অপেক্ষায় রয়েছে।');
+            setLoading(false);
+            try { auth?.signOut(); } catch (e) {}
+            return;
           }
         }
 
@@ -554,6 +636,36 @@ export const CustomerAuth: React.FC<CustomerAuthProps> = ({ onSuccess, onBack })
         )}
 
         <div className="p-6 sm:p-10">
+          {/* Maintenance Mode Notice */}
+          {shopSettings?.authSettings?.maintenanceMode && (
+            <motion.div 
+              initial={{ opacity: 0, y: -10 }} 
+              animate={{ opacity: 1, y: 0 }} 
+              className="bg-amber-50 text-amber-900 p-4 rounded-2xl text-xs sm:text-sm flex gap-3 border border-amber-200 font-bold items-center mb-6"
+            >
+              <AlertTriangle size={20} className="shrink-0 text-amber-600" />
+              <div>
+                <p className="font-black text-amber-950">সিস্টেম রক্ষণাবেক্ষণ চলছে</p>
+                <p className="text-[11px] font-medium text-amber-800 mt-0.5">{shopSettings.authSettings.maintenanceMessage || 'সার্ভিস আপডেট কাজের জন্য সিস্টেমটি সাময়িকভাবে বন্ধ আছে।'}</p>
+              </div>
+            </motion.div>
+          )}
+
+          {/* Registration Disabled Notice when on register tab */}
+          {step === 'form' && authMode === 'register' && shopSettings?.authSettings?.allowCustomerRegistration === false && (
+            <motion.div 
+              initial={{ opacity: 0, y: -10 }} 
+              animate={{ opacity: 1, y: 0 }} 
+              className="bg-rose-50 text-rose-800 p-4 rounded-2xl text-xs sm:text-sm flex gap-3 border border-rose-200 font-bold items-center mb-6"
+            >
+              <AlertTriangle size={20} className="shrink-0 text-rose-600" />
+              <div>
+                <p className="font-black text-rose-950">রেজিস্ট্রেশন বন্ধ আছে</p>
+                <p className="text-[11px] font-medium text-rose-700 mt-0.5">{shopSettings.authSettings.registrationDisabledNotice || 'বর্তমানে নতুন গ্রাহক অ্যাকাউন্ট তৈরি সাময়িকভাবে বন্ধ রাখা হয়েছে।'}</p>
+              </div>
+            </motion.div>
+          )}
+
           {/* Notifications / Alerts */}
           {error && (
             <motion.div 

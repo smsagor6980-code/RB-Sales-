@@ -1,6 +1,10 @@
-import React, { useState } from 'react';
-import { X, MapPin, Phone, User, CreditCard, Wallet, Truck, CheckCircle2, Loader2, ArrowRight, Package } from 'lucide-react';
-import { CartItem, Customer } from '../../types';
+import React, { useState, useMemo } from 'react';
+import { 
+  X, MapPin, Phone, User, CreditCard, Wallet, Truck, CheckCircle2, 
+  Loader2, ArrowRight, Package, Smartphone, Building2, Copy, Check,
+  AlertCircle, Sparkles, QrCode
+} from 'lucide-react';
+import { CartItem, Customer, ShopSettings, PaymentGateway, DEFAULT_PAYMENT_GATEWAYS } from '../../types';
 import { motion, AnimatePresence } from 'framer-motion';
 
 interface CheckoutModalProps {
@@ -8,7 +12,9 @@ interface CheckoutModalProps {
   onClose: () => void;
   items: CartItem[];
   customer: Customer | null;
+  shopSettings?: ShopSettings;
   onPlaceOrder: (orderData: any) => Promise<void>;
+  onOpenWallet?: () => void;
 }
 
 const CheckoutModal: React.FC<CheckoutModalProps> = ({
@@ -16,15 +22,32 @@ const CheckoutModal: React.FC<CheckoutModalProps> = ({
   onClose,
   items,
   customer,
-  onPlaceOrder
+  shopSettings,
+  onPlaceOrder,
+  onOpenWallet
 }) => {
   const [step, setStep] = useState<'shipping' | 'payment' | 'success'>('shipping');
   const [loading, setLoading] = useState(false);
+  const [copiedId, setCopiedId] = useState<string | null>(null);
+
+  // Active gateways from settings or defaults
+  const activeGateways: PaymentGateway[] = useMemo(() => {
+    const all = (shopSettings?.paymentGateways && shopSettings.paymentGateways.length > 0) 
+      ? shopSettings.paymentGateways 
+      : DEFAULT_PAYMENT_GATEWAYS;
+    return all.filter(g => g.status === 'active');
+  }, [shopSettings?.paymentGateways]);
+
+  const [selectedGatewayId, setSelectedGatewayId] = useState<string>(() => {
+    return activeGateways[0]?.id || 'cash_on_delivery';
+  });
+
   const [formData, setFormData] = useState({
     name: customer?.name || '',
     phone: customer?.phone || '',
     address: customer?.address || '',
-    paymentMethod: 'cash_on_delivery',
+    senderNumber: '',
+    trxId: '',
     notes: ''
   });
 
@@ -35,19 +58,55 @@ const CheckoutModal: React.FC<CheckoutModalProps> = ({
         name: prev.name || customer.name || '',
         phone: prev.phone || customer.phone || '',
         address: prev.address || customer.address || '',
+        senderNumber: prev.senderNumber || customer.phone || ''
       }));
     }
   }, [customer]);
 
+  React.useEffect(() => {
+    if (activeGateways.length > 0 && !activeGateways.some(g => g.id === selectedGatewayId)) {
+      setSelectedGatewayId(activeGateways[0].id);
+    }
+  }, [activeGateways, selectedGatewayId]);
+
+  const selectedGateway = useMemo(() => {
+    return activeGateways.find(g => g.id === selectedGatewayId) || activeGateways[0];
+  }, [activeGateways, selectedGatewayId]);
+
   const subtotal = items.reduce((sum, item) => sum + item.total, 0);
-  const deliveryFee = 60;
+  const deliveryFee = shopSettings?.deliveryCharge ?? 60;
   const total = subtotal + deliveryFee;
 
+  const customerWalletBal = customer?.walletBalance || 0;
+  const isRestPay = selectedGateway?.id === 'rest_pay';
+  const hasEnoughWalletBalance = customerWalletBal >= total;
+  const cashbackPercent = shopSettings?.walletSettings?.cashbackPercentage || 2;
+  const estimatedCashback = Math.round((total * cashbackPercent) / 100);
+
+  const copyToClipboard = (text: string, id: string) => {
+    navigator.clipboard.writeText(text);
+    setCopiedId(id);
+    setTimeout(() => setCopiedId(null), 2000);
+  };
+
   const handlePlaceOrder = async () => {
+    if (isRestPay && !hasEnoughWalletBalance) {
+      alert(`আপনার রেস্ট পে ওয়ালেটে পর্যাপ্ত ব্যালেন্স নেই। আরও ৳${(total - customerWalletBal).toLocaleString()} রিচার্জ করুন অথবা অন্য মাধ্যমে পেমেন্ট করুন।`);
+      return;
+    }
+
     setLoading(true);
     try {
       await onPlaceOrder({
         ...formData,
+        paymentMethod: selectedGateway?.id || 'cash_on_delivery',
+        paymentGatewayId: selectedGateway?.id || 'cash_on_delivery',
+        paymentGatewayName: selectedGateway?.name || 'ক্যাশ অন ডেলিভারি',
+        senderNumber: formData.senderNumber,
+        trxId: formData.trxId,
+        isWalletPayment: isRestPay,
+        walletDeductionAmount: isRestPay ? total : 0,
+        estimatedCashback: isRestPay ? estimatedCashback : 0,
         items,
         subtotal,
         deliveryFee,
@@ -61,6 +120,20 @@ const CheckoutModal: React.FC<CheckoutModalProps> = ({
       alert("অর্ডার সম্পন্ন করা সম্ভব হয়নি। আবার চেষ্টা করুন।");
     } finally {
       setLoading(false);
+    }
+  };
+
+  const getGatewayIcon = (id: string) => {
+    switch (id) {
+      case 'cash_on_delivery': return Truck;
+      case 'rest_pay': return Wallet;
+      case 'bkash':
+      case 'nagad':
+      case 'rocket':
+      case 'upay':
+      case 'cellfin': return Smartphone;
+      case 'bank_transfer': return Building2;
+      default: return CreditCard;
     }
   };
 
@@ -156,32 +229,171 @@ const CheckoutModal: React.FC<CheckoutModalProps> = ({
 
                   {/* Payment Method Section */}
                   <div className="space-y-4 pt-4">
-                    <h3 className="text-[11px] font-black text-slate-900 uppercase tracking-widest border-b pb-2 flex items-center gap-2">
-                      <CreditCard size={14} className="text-primary" /> ২. পেমেন্ট পদ্ধতি
-                    </h3>
-                    
-                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                      {[
-                        { id: 'cash_on_delivery', name: 'ক্যাশ অন ডেলিভারি', icon: Truck, desc: 'হাতে পেয়ে পেমেন্ট' },
-                        { id: 'bkash', name: 'বিকাশ / নগদ', icon: Wallet, desc: 'মোবাইল ব্যাংকিং' },
-                        { id: 'card', name: 'কার্ড পেমেন্ট', icon: CreditCard, desc: 'ডেবিট/ক্রেডিট কার্ড' }
-                      ].map((method) => (
-                        <button
-                          key={method.id}
-                          type="button"
-                          onClick={() => setFormData({...formData, paymentMethod: method.id})}
-                          className={`flex flex-col items-center text-center p-4 rounded-2xl border-2 transition-all gap-2 cursor-pointer ${formData.paymentMethod === method.id ? 'border-primary bg-primary/5 shadow-md shadow-primary/5 scale-102' : 'border-slate-100 hover:border-slate-200 bg-slate-50/50'}`}
-                        >
-                          <div className={`w-10 h-10 rounded-xl flex items-center justify-center transition-colors ${formData.paymentMethod === method.id ? 'bg-primary text-white' : 'bg-slate-100 text-slate-400'}`}>
-                            <method.icon size={20} />
-                          </div>
-                          <div>
-                            <h4 className="font-black text-slate-800 text-[11px]">{method.name}</h4>
-                            <p className="text-slate-400 text-[8px] font-bold mt-0.5 uppercase tracking-tighter">{method.desc}</p>
-                          </div>
-                        </button>
-                      ))}
+                    <div className="flex justify-between items-center border-b pb-2">
+                      <h3 className="text-[11px] font-black text-slate-900 uppercase tracking-widest flex items-center gap-2">
+                        <CreditCard size={14} className="text-primary" /> ২. পেমেন্ট পদ্ধতি নির্বাচন করুন
+                      </h3>
+                      {customer && (
+                        <span className="text-[10px] font-black text-indigo-600 bg-indigo-50 px-2.5 py-1 rounded-xl flex items-center gap-1.5">
+                          <Wallet size={12}/> রেস্ট পে: ৳{customerWalletBal.toLocaleString()}
+                        </span>
+                      )}
                     </div>
+                    
+                    {/* Gateway Buttons */}
+                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                      {activeGateways.map((gw) => {
+                        const Icon = getGatewayIcon(gw.id);
+                        const isSelected = selectedGatewayId === gw.id;
+                        return (
+                          <button
+                            key={gw.id}
+                            type="button"
+                            onClick={() => setSelectedGatewayId(gw.id)}
+                            className={`flex flex-col items-center text-center p-3.5 rounded-2xl border-2 transition-all gap-2 cursor-pointer relative ${isSelected ? 'border-primary bg-primary/5 shadow-md shadow-primary/5 scale-102 font-black' : 'border-slate-100 hover:border-slate-200 bg-slate-50/50'}`}
+                          >
+                            <div className={`w-9 h-9 rounded-xl flex items-center justify-center transition-colors ${isSelected ? 'bg-primary text-white' : 'bg-slate-100 text-slate-400'}`}>
+                              <Icon size={18} />
+                            </div>
+                            <div>
+                              <h4 className="font-black text-slate-800 text-[11px] leading-tight">{gw.name}</h4>
+                              <p className="text-slate-400 text-[8px] font-bold mt-0.5 uppercase tracking-tight">
+                                {gw.id === 'rest_pay' ? `ব্যালেন্স ৳${customerWalletBal}` : (gw.nameEn || gw.id)}
+                              </p>
+                            </div>
+                            {gw.discountPercentage !== undefined && gw.discountPercentage > 0 && (
+                              <span className="absolute -top-1.5 -right-1.5 bg-emerald-500 text-white text-[7px] font-black px-1.5 py-0.5 rounded-full">
+                                {gw.discountPercentage}% OFF
+                              </span>
+                            )}
+                          </button>
+                        );
+                      })}
+                    </div>
+
+                    {/* Gateway Detail View */}
+                    {selectedGateway && (
+                      <div className="mt-4 p-5 bg-slate-50 rounded-3xl border-2 border-slate-100 space-y-4">
+                        {/* Rest Pay Wallet Card */}
+                        {isRestPay ? (
+                          <div className="space-y-3">
+                            <div className="flex items-center justify-between bg-gradient-to-r from-indigo-900 to-slate-900 p-5 rounded-2xl text-white">
+                              <div className="flex items-center gap-3">
+                                <div className="p-2.5 bg-white/10 rounded-xl">
+                                  <Wallet size={24} className="text-amber-400" />
+                                </div>
+                                <div>
+                                  <p className="text-[10px] font-black text-indigo-300 uppercase tracking-widest">রেস্ট পে ওয়ালেট</p>
+                                  <h4 className="text-lg font-black text-white mt-0.5">
+                                    বর্তমান ব্যালেন্স: ৳{customerWalletBal.toLocaleString()}
+                                  </h4>
+                                </div>
+                              </div>
+                              <div className="text-right">
+                                <span className={`text-[10px] font-black uppercase px-3 py-1 rounded-full ${hasEnoughWalletBalance ? 'bg-emerald-500/30 text-emerald-300 border border-emerald-400/30' : 'bg-rose-500/30 text-rose-300 border border-rose-400/30'}`}>
+                                  {hasEnoughWalletBalance ? 'পর্যাপ্ত ব্যালেন্স' : 'অপর্যাপ্ত ব্যালেন্স'}
+                                </span>
+                              </div>
+                            </div>
+
+                            {hasEnoughWalletBalance ? (
+                              <div className="flex items-center gap-2 text-xs font-black text-emerald-700 bg-emerald-50 p-3.5 rounded-2xl border border-emerald-100">
+                                <Sparkles size={16} className="text-amber-500 shrink-0" />
+                                <span>১-ক্লিকে তাৎক্ষণিক পেমেন্ট সম্পন্ন হবে এবং ৳{estimatedCashback} ক্যাশব্যাক যোগ হবে!</span>
+                              </div>
+                            ) : (
+                              <div className="space-y-2">
+                                <div className="flex items-center gap-2 text-xs font-bold text-rose-600 bg-rose-50 p-3.5 rounded-2xl border border-rose-100">
+                                  <AlertCircle size={16} className="shrink-0" />
+                                  <span>ঘাটতি: ৳{(total - customerWalletBal).toLocaleString()}। ওয়ালেটে টাকা রিচার্জ করুন অথবা অন্য মাধ্যমে অর্ডার করুন।</span>
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        ) : selectedGateway.id === 'cash_on_delivery' ? (
+                          <div className="flex items-center gap-3 p-4 bg-emerald-50 rounded-2xl text-emerald-800 border border-emerald-100">
+                            <Truck size={22} className="text-emerald-600 shrink-0" />
+                            <div>
+                              <p className="text-xs font-black">ক্যাশ অন ডেলিভারি (হাতে পেয়ে পেমেন্ট)</p>
+                              <p className="text-[10px] font-bold text-emerald-600 mt-0.5">
+                                ডেলিভারি প্রতিনিধি পণ্য পৌঁছে দেওয়ার পর নগদ ৳{total.toLocaleString()} টাকা পরিশোধ করুন।
+                              </p>
+                            </div>
+                          </div>
+                        ) : (
+                          <div className="space-y-4">
+                            {/* Mobile Banking / Bank Transfer details */}
+                            <div className="bg-white p-4 rounded-2xl border border-slate-200 space-y-3">
+                              <div className="flex items-center justify-between">
+                                <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">
+                                  {selectedGateway.accountType === 'merchant' ? 'মার্চেন্ট নম্বর' : selectedGateway.accountType === 'personal' ? 'পার্সোনাল নম্বর' : 'অ্যাকাউন্ট নম্বর'}
+                                </span>
+                                <span className="text-[10px] font-black bg-indigo-50 text-indigo-700 px-2 py-0.5 rounded-lg uppercase">
+                                  {selectedGateway.accountType === 'merchant' ? 'Payment করুন' : 'Send Money করুন'}
+                                </span>
+                              </div>
+
+                              {selectedGateway.number && (
+                                <div className="flex items-center justify-between bg-slate-50 p-3 rounded-xl">
+                                  <span className="font-mono font-black text-slate-900 text-base">{selectedGateway.number}</span>
+                                  <button
+                                    type="button"
+                                    onClick={() => copyToClipboard(selectedGateway.number || '', selectedGateway.id)}
+                                    className="px-3 py-1 bg-white hover:bg-slate-100 border border-slate-200 rounded-lg text-xs font-black text-slate-700 flex items-center gap-1.5"
+                                  >
+                                    {copiedId === selectedGateway.id ? <Check size={14} className="text-emerald-600"/> : <Copy size={14}/>}
+                                    {copiedId === selectedGateway.id ? 'কপি হয়েছে' : 'কপি করুন'}
+                                  </button>
+                                </div>
+                              )}
+
+                              {selectedGateway.bankDetails && selectedGateway.bankDetails.bankName && (
+                                <div className="bg-slate-50 p-3 rounded-xl space-y-1 text-xs">
+                                  <p className="font-black text-slate-800">{selectedGateway.bankDetails.bankName}</p>
+                                  <p className="text-[11px] text-slate-600">হিসাব নম্বর: <span className="font-mono font-black">{selectedGateway.bankDetails.accountNumber}</span></p>
+                                  <p className="text-[10px] text-slate-400">হিসাবের নাম: {selectedGateway.bankDetails.accountName}, শাখা: {selectedGateway.bankDetails.branchName}</p>
+                                </div>
+                              )}
+
+                              {selectedGateway.instructions && (
+                                <p className="text-[11px] text-slate-600 font-bold bg-amber-50/50 p-3 rounded-xl border border-amber-100/50">
+                                  📌 {selectedGateway.instructions}
+                                </p>
+                              )}
+                            </div>
+
+                            {/* Verification Inputs */}
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                              <div className="space-y-1.5">
+                                <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest">
+                                  যে নম্বর থেকে টাকা পাঠিয়েছেন
+                                </label>
+                                <input
+                                  type="text"
+                                  className="w-full border-2 border-slate-100 rounded-xl p-3 text-xs font-black bg-white outline-none focus:border-primary"
+                                  placeholder="017XXXXXXXX"
+                                  value={formData.senderNumber}
+                                  onChange={e => setFormData({ ...formData, senderNumber: e.target.value })}
+                                />
+                              </div>
+
+                              <div className="space-y-1.5">
+                                <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest">
+                                  Transaction ID (TrxID)
+                                </label>
+                                <input
+                                  type="text"
+                                  className="w-full border-2 border-slate-100 rounded-xl p-3 text-xs font-black font-mono bg-white outline-none focus:border-primary uppercase"
+                                  placeholder="e.g. 9B4F81A..."
+                                  value={formData.trxId}
+                                  onChange={e => setFormData({ ...formData, trxId: e.target.value })}
+                                />
+                              </div>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    )}
                   </div>
 
                   {/* Mobile Order Button */}
@@ -189,7 +401,7 @@ const CheckoutModal: React.FC<CheckoutModalProps> = ({
                     <button 
                       type="button"
                       onClick={handlePlaceOrder}
-                      disabled={loading || !formData.name || !formData.phone || !formData.address}
+                      disabled={loading || !formData.name || !formData.phone || !formData.address || (isRestPay && !hasEnoughWalletBalance)}
                       className="w-full bg-primary text-white py-4 rounded-2xl font-black uppercase text-xs shadow-xl shadow-primary/20 flex justify-center items-center gap-3 hover:scale-101 active:scale-98 transition-all disabled:bg-slate-200 disabled:shadow-none"
                     >
                       {loading ? <Loader2 className="animate-spin" size={18} /> : 'অর্ডার কনফার্ম করুন'}
@@ -271,7 +483,7 @@ const CheckoutModal: React.FC<CheckoutModalProps> = ({
                   <button 
                     type="button"
                     onClick={handlePlaceOrder}
-                    disabled={loading || !formData.name || !formData.phone || !formData.address}
+                    disabled={loading || !formData.name || !formData.phone || !formData.address || (isRestPay && !hasEnoughWalletBalance)}
                     className="w-full bg-primary text-white py-4 rounded-2xl font-black uppercase text-xs shadow-xl shadow-primary/20 flex justify-center items-center gap-3 hover:scale-[1.02] active:scale-[0.98] transition-all disabled:bg-slate-200 disabled:shadow-none"
                   >
                     {loading ? <Loader2 className="animate-spin" size={18} /> : 'অর্ডার কনফার্ম করুন'}

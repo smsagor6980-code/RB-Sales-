@@ -138,9 +138,31 @@
         "status": { "type": "string", "enum": ["active", "repaid", "overdue"] }
       },
       "required": ["id", "customerId", "customerName", "type", "amount", "remainingAmount", "date", "status"]
+    },
+    "CompanyBranch": {
+      "title": "CompanyBranch",
+      "description": "A company or branch in the multi-company setup",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "code": { "type": "string" },
+        "phone": { "type": "string" },
+        "email": { "type": "string" },
+        "address": { "type": "string" },
+        "currency": { "type": "string" },
+        "status": { "type": "string", "enum": ["active", "inactive"] },
+        "isDefault": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "name", "status", "createdAt"]
     }
   },
   "firestore": {
+    "/companies/{companyId}": {
+      "schema": "CompanyBranch",
+      "description": "Collection of companies and branches"
+    },
     "/products/{productId}": {
       "schema": "Product",
       "description": "Collection of products"
@@ -176,6 +198,10 @@
     "/customer_loans/{loanId}": {
       "schema": "CustomerLoan",
       "description": "Collection of customer advance and loans"
+    },
+    "/wallet_transactions/{transactionId}": {
+      "schema": "object",
+      "description": "Collection of customer Rest Pay wallet transactions and top-up requests"
     }
   }
 }

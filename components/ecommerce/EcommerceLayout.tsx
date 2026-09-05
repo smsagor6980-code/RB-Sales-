@@ -155,26 +155,6 @@ const EcommerceLayout: React.FC<EcommerceLayoutProps> = ({
                 )}
               </button>
 
-              {onSwitchToAdmin && (
-                isAdmin ? (
-                  <button 
-                    onClick={onSwitchToAdmin}
-                    className="flex items-center gap-1.5 px-3 py-2 bg-slate-900 text-white rounded-xl text-[10px] sm:text-xs font-black uppercase tracking-widest hover:bg-slate-800 transition-all"
-                  >
-                    <Package size={14} />
-                    <span>এডমিন</span>
-                  </button>
-                ) : (!isCustomer && !customerName) ? (
-                  <button 
-                    onClick={onSwitchToAdmin}
-                    className="flex items-center gap-1.5 px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-[10px] sm:text-xs font-bold transition-all"
-                  >
-                    <User size={14} />
-                    <span>স্টাফ লগইন</span>
-                  </button>
-                ) : null
-              )}
-
               <div className="h-8 w-[1px] bg-slate-200 mx-1 hidden lg:block"></div>
 
               <button 
@@ -314,22 +294,6 @@ const EcommerceLayout: React.FC<EcommerceLayoutProps> = ({
                 >
                   <User size={20} /> আমার প্রোফাইল
                 </button>
-                {isAdmin && onSwitchToAdmin && (
-                  <button 
-                    onClick={() => { onSwitchToAdmin(); setIsMenuOpen(false); }}
-                    className="w-full flex items-center gap-3 p-4 rounded-2xl bg-slate-900 text-white font-bold transition-all"
-                  >
-                    <Package size={20} /> এডমিন প্যানেল
-                  </button>
-                )}
-                {!isAdmin && !isCustomer && !customerName && onSwitchToAdmin && (
-                  <button 
-                    onClick={() => { onSwitchToAdmin(); setIsMenuOpen(false); }}
-                    className="w-full flex items-center gap-3 p-4 rounded-2xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold transition-all"
-                  >
-                    <User size={20} /> স্টাফ লগইন
-                  </button>
-                )}
               </div>
 
               <div className="absolute bottom-6 left-6 right-6">
@@ -384,9 +348,6 @@ const EcommerceLayout: React.FC<EcommerceLayoutProps> = ({
                 <li><button className="hover:text-primary transition-colors">হেল্প সেন্টার</button></li>
                 <li><button className="hover:text-primary transition-colors">রিটার্ন পলিসি</button></li>
                 <li><button className="hover:text-primary transition-colors">ডেলিভারি ট্র্যাকিং</button></li>
-                {(!isCustomer && !customerName && onSwitchToAdmin) && (
-                  <li><button onClick={onSwitchToAdmin} className="hover:text-primary transition-colors">স্টাফ লগইন</button></li>
-                )}
               </ul>
             </div>
 

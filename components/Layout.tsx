@@ -1,5 +1,5 @@
 
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { 
   LayoutDashboard, 
   ShoppingCart, 
@@ -30,9 +30,17 @@ import {
   Save,
   Sparkles,
   Palette,
-  Type
+  Type,
+  Building2,
+  ChevronDown,
+  Layers,
+  Globe,
+  Plus,
+  Calendar,
+  Clock
 } from 'lucide-react';
-import { AppRole, Product, ShopSettings, calculateLowStockAlerts } from '../types';
+import { AppRole, Product, ShopSettings, CompanyBranch, calculateLowStockAlerts } from '../types';
+import { getLocalDateString, formatDisplayDate, formatDisplayTime } from '../services/dateUtils';
 
 export const HEADER_COLOR_PRESETS = [
   { id: '#1e1e5f', label: 'রয়্যাল নেভি', bg: '#1e1e5f', gradient: 'from-[#111836] via-[#1e1e5f] to-[#16164a]', border: 'border-indigo-500/30' },
@@ -81,6 +89,9 @@ interface LayoutProps {
   products?: Product[];
   shopSettings?: ShopSettings;
   onUpdateShopSettings?: (settings: any) => void;
+  companies?: CompanyBranch[];
+  activeCompanyId?: string;
+  onSelectCompany?: (companyId: string) => void;
 }
 
 const Layout: React.FC<LayoutProps> = ({ 
@@ -96,11 +107,49 @@ const Layout: React.FC<LayoutProps> = ({
   onSwitchToShop,
   products = [],
   shopSettings,
-  onUpdateShopSettings
+  onUpdateShopSettings,
+  companies = [],
+  activeCompanyId = 'company-main',
+  onSelectCompany
 }) => {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [showLogoModal, setShowLogoModal] = useState(false);
+  const [companyDropdownOpen, setCompanyDropdownOpen] = useState(false);
+  const companyDropdownRef = useRef<HTMLDivElement>(null);
+  const [currentDateTime, setCurrentDateTime] = useState<Date>(() => new Date());
 
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setCurrentDateTime(new Date());
+    }, 10000);
+    return () => clearInterval(timer);
+  }, []);
+
+  // Close dropdown on click outside
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (companyDropdownRef.current && !companyDropdownRef.current.contains(event.target as Node)) {
+        setCompanyDropdownOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  // Check if current user is the master owner/superadmin
+  const isMasterOwner = (userEmail || '').toLowerCase().trim() === 'smsagor6980@gmail.com';
+  
+  // If user is a branch admin/staff (not master owner), only allow access to their matched companies
+  const accessibleCompanies = useMemo(() => {
+    if (isMasterOwner) return companies;
+    const userEmailLower = (userEmail || '').toLowerCase().trim();
+    const matched = companies.filter(c => 
+      (c.adminEmail && c.adminEmail.toLowerCase().trim() === userEmailLower) || 
+      (c.email && c.email.toLowerCase().trim() === userEmailLower) ||
+      c.id === activeCompanyId
+    );
+    return matched.length > 0 ? matched : (companies.filter(c => c.id === activeCompanyId).length > 0 ? companies.filter(c => c.id === activeCompanyId) : companies);
+  }, [companies, isMasterOwner, userEmail, activeCompanyId]);
   // Local editing state for Header Customization
   const [headerFormData, setHeaderFormData] = useState({
     logoUrl: shopSettings?.logoUrl || '',
@@ -221,25 +270,46 @@ const Layout: React.FC<LayoutProps> = ({
   const DEFAULT_PERMISSIONS: Record<string, string[]> = {
     'owner': ['dashboard', 'sales', 'approvals', 'products', 'customers', 'suppliers', 'returns', 'employees', 'payroll', 'company_loans', 'expenses', 'due', 'reports', 'settings'],
     'admin': ['dashboard', 'sales', 'approvals', 'products', 'customers', 'suppliers', 'returns', 'employees', 'payroll', 'company_loans', 'expenses', 'due', 'reports', 'settings'],
-    'manager': ['dashboard', 'sales', 'approvals', 'products', 'customers', 'suppliers', 'returns', 'company_loans', 'expenses', 'due', 'reports'],
-    'salesman': ['dashboard', 'sales', 'products', 'customers', 'returns', 'due'],
+    'super admin': ['dashboard', 'sales', 'approvals', 'products', 'customers', 'suppliers', 'returns', 'employees', 'payroll', 'company_loans', 'expenses', 'due', 'reports', 'settings'],
+    'মালিক': ['dashboard', 'sales', 'approvals', 'products', 'customers', 'suppliers', 'returns', 'employees', 'payroll', 'company_loans', 'expenses', 'due', 'reports', 'settings'],
+    'এডমিন': ['dashboard', 'sales', 'approvals', 'products', 'customers', 'suppliers', 'returns', 'employees', 'payroll', 'company_loans', 'expenses', 'due', 'reports', 'settings'],
+    'manager': ['dashboard', 'sales', 'approvals', 'products', 'customers', 'suppliers', 'returns', 'employees', 'payroll', 'company_loans', 'expenses', 'due', 'reports'],
+    'ম্যানেজার': ['dashboard', 'sales', 'approvals', 'products', 'customers', 'suppliers', 'returns', 'employees', 'payroll', 'company_loans', 'expenses', 'due', 'reports'],
+    'branch manager': ['dashboard', 'sales', 'approvals', 'products', 'customers', 'suppliers', 'returns', 'employees', 'payroll', 'company_loans', 'expenses', 'due', 'reports'],
+    'accountant': ['dashboard', 'sales', 'approvals', 'products', 'customers', 'suppliers', 'returns', 'payroll', 'company_loans', 'expenses', 'due', 'reports'],
+    'হিসাবরক্ষক': ['dashboard', 'sales', 'approvals', 'products', 'customers', 'suppliers', 'returns', 'payroll', 'company_loans', 'expenses', 'due', 'reports'],
+    'cashier': ['dashboard', 'sales', 'approvals', 'products', 'customers', 'returns', 'expenses', 'due'],
+    'ক্যাশিয়ার': ['dashboard', 'sales', 'approvals', 'products', 'customers', 'returns', 'expenses', 'due'],
+    'salesman': ['dashboard', 'sales', 'approvals', 'products', 'customers', 'returns', 'due'],
+    'সেলসম্যান': ['dashboard', 'sales', 'approvals', 'products', 'customers', 'returns', 'due'],
   };
 
   // Find permissions for current user role safely
-  const currentUserRole = roles.find(r => r?.name && typeof r.name === 'string' && r.name.trim().toLowerCase() === (userRoleName || 'Salesman').trim().toLowerCase());
+  const normalizedRoleName = (userRoleName || (isAdmin ? 'Admin' : 'Salesman')).trim().toLowerCase();
+  const currentUserRole = roles.find(r => r?.name && typeof r.name === 'string' && r.name.trim().toLowerCase() === normalizedRoleName);
   let permissions = (currentUserRole && Array.isArray(currentUserRole.permissions)) ? currentUserRole.permissions : [];
 
   // If no permissions loaded yet, use the default standard permissions
   if (permissions.length === 0) {
-    const roleKey = (userRoleName || 'Salesman').trim().toLowerCase();
-    permissions = DEFAULT_PERMISSIONS[roleKey] || DEFAULT_PERMISSIONS['salesman'];
+    permissions = DEFAULT_PERMISSIONS[normalizedRoleName] || (isAdmin ? DEFAULT_PERMISSIONS['admin'] : DEFAULT_PERMISSIONS['salesman']);
   }
 
   const canAccess = (itemId: string) => {
-    const roleName = (userRoleName || 'Salesman').trim().toLowerCase();
-    // Owners and Admins always have full access
-    if (isAdmin || roleName === 'owner' || roleName === 'admin') return true;
+    // Only the Master Owner (smsagor6980@gmail.com) on the Main / Master view can access and see Company/Branch Management.
+    // In newly created companies or branch views, the company & branch menu is NOT shown.
+    if (itemId === 'companies') {
+      const isViewingMainOrMaster = activeCompanyId === 'all' || activeCompanyId === 'company-main';
+      const isPrivileged = isMasterOwner || isAdmin || ['owner', 'admin', 'super admin', 'মালিক', 'এডমিন', 'company admin', 'director', 'manager', 'ম্যানেজার'].includes(normalizedRoleName);
+      return isPrivileged && isViewingMainOrMaster;
+    }
+
+    const roleName = normalizedRoleName;
+    // Owners, Admins, Super Admins, Managers and Directors always have full access (except for companies menu which is handled above)
+    if (isAdmin || ['owner', 'admin', 'super admin', 'মালিক', 'এডমিন', 'company admin', 'director', 'manager', 'ম্যানেজার', 'branch manager', 'executive'].includes(roleName)) return true;
     
+    // If permissions array contains '*' or 'all', grant access
+    if (permissions.includes('*') || permissions.includes('all')) return true;
+
     // For others, check defined permissions
     return permissions.includes(itemId);
   };
@@ -258,6 +328,7 @@ const Layout: React.FC<LayoutProps> = ({
     { id: 'expenses', label: 'খরচ (Expenses)', icon: TrendingDown, color: 'text-rose-600', bg: 'bg-rose-50' },
     { id: 'due', label: 'বকেয়া তালিকা', icon: FileText, color: 'text-orange-600', bg: 'bg-orange-50' },
     { id: 'reports', label: 'রিপোর্ট', icon: FileBarChart, color: 'text-purple-600', bg: 'bg-purple-50' },
+    { id: 'companies', label: 'কোম্পানি ও ব্রাঞ্চ', icon: Building2, color: 'text-indigo-600', bg: 'bg-indigo-50' },
     { id: 'settings', label: 'সেটিংস', icon: SettingsIcon, color: 'text-slate-600', bg: 'bg-slate-100' },
   ].filter(item => canAccess(item.id));
 
@@ -357,6 +428,144 @@ const Layout: React.FC<LayoutProps> = ({
           </div>
 
           <div className="flex items-center gap-3">
+            {/* Company / Branch Switcher: Displayed in Master/Main view for Master Owner or Admin */}
+            {(isMasterOwner || isAdmin) && (activeCompanyId === 'all' || activeCompanyId === 'company-main') && companies.length > 0 && (
+              <div className="relative" ref={companyDropdownRef}>
+                <button
+                  onClick={() => setCompanyDropdownOpen(!companyDropdownOpen)}
+                  className="flex items-center gap-2 px-3 py-1.5 bg-white/10 hover:bg-white/20 text-white rounded-xl text-xs font-bold transition-all border border-white/20 shadow-xs active:scale-95 group"
+                  title="কোম্পানি বা ব্রাঞ্চ পরিবর্তন করুন (মাস্টার কন্ট্রোল)"
+                  id="btn-company-switcher"
+                >
+                  <div className="w-5 h-5 rounded-lg bg-amber-400 text-slate-950 flex items-center justify-center text-[10px] font-black shrink-0">
+                    <Building2 size={12} />
+                  </div>
+                  <div className="text-left hidden sm:block max-w-[130px] md:max-w-[170px] truncate">
+                    <span className="block text-[10px] text-amber-200 uppercase font-black tracking-wider leading-none">
+                      {activeCompanyId === 'all' ? 'সম্মিলিত ভিউ' : 'প্রধান শাখা'}
+                    </span>
+                    <span className="text-xs font-black truncate block mt-0.5 leading-none">
+                      {activeCompanyId === 'all' 
+                        ? 'সকল কোম্পানি (All)' 
+                        : (companies.find(c => c.id === activeCompanyId)?.name || 'REST BAZER')}
+                    </span>
+                  </div>
+                  <ChevronDown size={14} className={`text-slate-300 transition-transform duration-200 ${companyDropdownOpen ? 'rotate-180' : ''}`} />
+                </button>
+
+                {/* Dropdown Menu */}
+                {companyDropdownOpen && (
+                  <div className="absolute right-0 mt-2 w-72 sm:w-80 bg-white rounded-2xl shadow-2xl border border-slate-200 py-2 z-[999] text-slate-800 animate-in fade-in zoom-in-95 duration-150">
+                    <div className="px-4 py-2 border-b border-slate-100 flex items-center justify-between">
+                      <span className="text-[11px] font-black uppercase tracking-wider text-slate-500 flex items-center gap-1.5">
+                        <Building2 size={13} className="text-indigo-600" /> ব্রাঞ্চ / কোম্পানি নির্বাচন
+                      </span>
+                      <span className="text-[10px] font-bold bg-indigo-50 text-indigo-700 px-2 py-0.5 rounded-full">
+                        মোট {companies.length} টি
+                      </span>
+                    </div>
+
+                    <div className="max-h-64 overflow-y-auto py-1 custom-scrollbar">
+                      {/* All Companies Option strictly for Master Owner */}
+                      <button
+                        onClick={() => {
+                          if (onSelectCompany) onSelectCompany('all');
+                          setCompanyDropdownOpen(false);
+                        }}
+                        className={`w-full px-4 py-2.5 text-left flex items-center justify-between hover:bg-slate-50 transition-colors border-b border-slate-100 ${activeCompanyId === 'all' ? 'bg-indigo-50/80 text-indigo-900 font-black' : ''}`}
+                      >
+                        <div className="flex items-center gap-2.5">
+                          <div className="w-8 h-8 rounded-xl bg-indigo-600 text-white flex items-center justify-center font-black text-xs shrink-0 shadow-xs">
+                            <Globe size={15} />
+                          </div>
+                          <div>
+                            <div className="text-xs font-black text-slate-900">সকল কোম্পানি / সম্মিলিত ভিউ</div>
+                            <div className="text-[10px] text-slate-500 font-medium">সব ব্রাঞ্চের মোট স্টক, সেলস ও ডেটা</div>
+                          </div>
+                        </div>
+                        {activeCompanyId === 'all' && (
+                          <Check size={16} className="text-indigo-600 font-black" />
+                        )}
+                      </button>
+
+                      {/* Individual Companies */}
+                      {companies.map(comp => {
+                        const isSelected = activeCompanyId === comp.id;
+                        return (
+                          <button
+                            key={comp.id}
+                            onClick={() => {
+                              if (onSelectCompany) onSelectCompany(comp.id);
+                              setCompanyDropdownOpen(false);
+                            }}
+                            className={`w-full px-4 py-2.5 text-left flex items-center justify-between hover:bg-slate-50 transition-colors ${isSelected ? 'bg-indigo-50/80 text-indigo-900 font-black' : ''}`}
+                          >
+                            <div className="flex items-center gap-2.5 min-w-0">
+                              {comp.logoUrl ? (
+                                <img 
+                                  src={comp.logoUrl} 
+                                  alt={comp.name} 
+                                  className="w-8 h-8 rounded-xl object-contain bg-white border border-slate-200 p-0.5 shrink-0" 
+                                />
+                              ) : (
+                                <div 
+                                  style={{ backgroundColor: comp.headerBgColor || '#1e1e5f' }}
+                                  className="w-8 h-8 rounded-xl text-white flex items-center justify-center font-black text-xs shrink-0 shadow-xs"
+                                >
+                                  {comp.code?.slice(0, 2) || comp.name.slice(0, 1)}
+                                </div>
+                              )}
+                              <div className="min-w-0">
+                                <div className="text-xs font-black text-slate-900 truncate flex items-center gap-1.5">
+                                  {comp.name}
+                                  {comp.isDefault && (
+                                    <span className="text-[9px] bg-amber-100 text-amber-800 px-1.5 py-0.2 rounded font-bold">প্রধান</span>
+                                  )}
+                                </div>
+                                <div className="text-[10px] text-slate-500 font-medium truncate flex items-center gap-1">
+                                  <span className="font-mono text-indigo-600 font-bold">{comp.code || 'BR'}</span>
+                                  {comp.address && <span>• {comp.address}</span>}
+                                </div>
+                              </div>
+                            </div>
+                            {isSelected && (
+                              <Check size={16} className="text-indigo-600 font-black shrink-0 ml-2" />
+                            )}
+                          </button>
+                        );
+                      })}
+                    </div>
+
+                    <div className="pt-1 mt-1 border-t border-slate-100 px-2 space-y-1">
+                      <button
+                        onClick={() => {
+                          setActivePage('companies');
+                          setCompanyDropdownOpen(false);
+                        }}
+                        className="w-full py-2 px-3 text-xs font-bold text-indigo-600 hover:bg-indigo-50 rounded-xl flex items-center justify-center gap-1.5 transition-colors"
+                      >
+                        <Building2 size={14} /> কোম্পানি ও ব্রাঞ্চ পরিচালনা করুন
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Live Date & Time Widget in Header */}
+            <div className="hidden sm:flex items-center gap-2 px-3 py-1.5 bg-white/10 hover:bg-white/15 rounded-xl border border-white/15 text-white transition-all shadow-xs shrink-0" title="আজকের তারিখ ও সময়">
+              <Calendar size={14} className="text-amber-300 shrink-0" />
+              <div className="text-left leading-tight">
+                <div className="text-[11px] font-black text-amber-200 tracking-tight">
+                  {formatDisplayDate(getLocalDateString(currentDateTime))}
+                </div>
+                <div className="text-[10px] font-bold text-white/80 flex items-center gap-1">
+                  <Clock size={10} className="text-amber-300" />
+                  <span>{formatDisplayTime(currentDateTime)}</span>
+                </div>
+              </div>
+            </div>
+
             {onSwitchToShop && (
               <button 
                 onClick={onSwitchToShop}
@@ -792,6 +1001,22 @@ const Layout: React.FC<LayoutProps> = ({
       <div className="flex flex-1 overflow-hidden relative">
         <aside className={`bg-white shadow-2xl w-64 flex-shrink-0 z-[60] transition-all duration-300 fixed lg:static h-full print:hidden border-r border-slate-100 ${mobileMenuOpen ? 'left-0' : '-left-64 lg:left-0'}`}>
           <nav className="p-4 space-y-1.5 overflow-y-auto h-full pb-24 lg:pb-8 custom-scrollbar">
+            {/* Live Date & Time Card in Sidebar Navigation */}
+            <div className="bg-gradient-to-br from-indigo-50 to-slate-50 border border-indigo-100/80 rounded-2xl p-3 mb-2 flex items-center gap-2.5 shadow-2xs">
+              <div className="w-8 h-8 rounded-xl bg-indigo-600/10 text-indigo-700 flex items-center justify-center shrink-0">
+                <Calendar size={16} />
+              </div>
+              <div className="min-w-0">
+                <div className="text-[11px] font-black text-slate-800 leading-tight truncate">
+                  {formatDisplayDate(getLocalDateString(currentDateTime))}
+                </div>
+                <div className="text-[10px] text-slate-500 font-bold flex items-center gap-1 mt-0.5">
+                  <Clock size={11} className="text-indigo-600" />
+                  <span>{formatDisplayTime(currentDateTime)}</span>
+                </div>
+              </div>
+            </div>
+
             <div className="px-3 py-2 mb-1 flex items-center justify-between">
               <p className="text-[10px] font-black text-slate-400 uppercase tracking-[2px]">মেনু ও ফিচারসমূহ</p>
               {isAdmin && <ShieldCheck size={14} className="text-emerald-600" />}

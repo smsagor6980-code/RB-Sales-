@@ -21,18 +21,20 @@ try {
 
 export const auth = getAuth(app);
 
-// Initialize Firestore safely with persistent local cache
+// Initialize Firestore safely with persistent local cache & auto-detect long polling
 let firestoreDb: any = null;
 try {
   const customDbId = firebaseConfig && firebaseConfig.firestoreDatabaseId ? firebaseConfig.firestoreDatabaseId : undefined;
-  
+  const firestoreSettings = {
+    experimentalAutoDetectLongPolling: true,
+    localCache: persistentLocalCache({
+      tabManager: persistentMultipleTabManager()
+    })
+  };
+
   if (customDbId) {
     try {
-      firestoreDb = initializeFirestore(app, {
-        localCache: persistentLocalCache({
-          tabManager: persistentMultipleTabManager()
-        })
-      }, customDbId);
+      firestoreDb = initializeFirestore(app, firestoreSettings, customDbId);
       console.log("Firestore initialized with persistent cache & custom database ID:", customDbId);
     } catch (initErr) {
       firestoreDb = getFirestore(app, customDbId);
@@ -40,11 +42,7 @@ try {
     }
   } else {
     try {
-      firestoreDb = initializeFirestore(app, {
-        localCache: persistentLocalCache({
-          tabManager: persistentMultipleTabManager()
-        })
-      });
+      firestoreDb = initializeFirestore(app, firestoreSettings);
       console.log("Firestore initialized with persistent cache");
     } catch (initErr) {
       firestoreDb = getFirestore(app);
