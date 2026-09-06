@@ -3,12 +3,13 @@ import {
   Store, Loader2, AlertTriangle, Eye, EyeOff, Lock, Mail, Phone, 
   ShoppingBag, CheckCircle, ShieldCheck, LogOut, Building2, MapPin, 
   Sparkles, User, ArrowRight, ExternalLink, Copy, Check, ChevronRight, 
-  ChevronLeft, Palette, FileText, Globe, Layers, CheckCircle2, Coins
+  ChevronLeft, Palette, FileText, Globe, Layers, CheckCircle2, Coins,
+  CreditCard, Zap
 } from 'lucide-react';
 import { auth, db } from '../services/firebase';
 import { doc, setDoc, collection, query, where, getDocs, deleteDoc } from 'firebase/firestore';
 import { createUserWithEmailAndPassword, signInWithEmailAndPassword } from 'firebase/auth';
-import { Staff, CompanyBranch } from '../types';
+import { Staff, CompanyBranch, CompanyBillingModel, CompanySubscriptionPlan, CompanyCommissionConfig } from '../types';
 
 interface AuthProps {
   isOnline: boolean;
@@ -68,7 +69,8 @@ const Auth: React.FC<AuthProps> = ({
   }, [targetCompany]);
 
   // Company Register Multi-Tab State
-  const [companyStep, setCompanyStep] = useState<'info' | 'contact' | 'admin' | 'theme'>('info');
+  const [companyStep, setCompanyStep] = useState<'info' | 'contact' | 'admin' | 'billing' | 'theme'>('info');
+  const [companyBillingType, setCompanyBillingType] = useState<'trial' | 'monthly' | 'commission'>('trial');
   const [companyName, setCompanyName] = useState('');
   const [companyTagline, setCompanyTagline] = useState('স্মার্ট ইনভেন্টরি ও সেলস সল্যুশন');
   const [companyOwnerName, setCompanyOwnerName] = useState('');
@@ -206,7 +208,55 @@ const Auth: React.FC<AuthProps> = ({
             const newCompanyId = `comp-${Date.now()}`;
             const cleanCode = companyName.trim().replace(/[^a-zA-Z0-9]/g, '').slice(0, 3).toUpperCase() || 'CMP';
             const code = `${cleanCode}-${Math.floor(100 + Math.random() * 900)}`;
-            const now = new Date().toISOString();
+            const now = new Date();
+            const nowISO = now.toISOString();
+
+            let bModel: CompanyBillingModel = 'subscription';
+            let expDate = new Date(now.getTime() + 14 * 86400000).toISOString();
+            let pName = '১৪ দিনের ফ্রি ট্রায়াল';
+            let pFee = 0;
+            let pCycle: 'trial' | 'monthly' = 'trial';
+            let commRate = 0;
+
+            if (companyBillingType === 'trial') {
+              bModel = 'subscription';
+              expDate = new Date(now.getTime() + 14 * 86400000).toISOString();
+              pName = '১৪ দিনের ফ্রি ট্রায়াল';
+              pFee = 0;
+              pCycle = 'trial';
+            } else if (companyBillingType === 'monthly') {
+              bModel = 'subscription';
+              expDate = new Date(now.getTime() + 30 * 86400000).toISOString();
+              pName = 'স্টার্টার মাসিক প্ল্যান';
+              pFee = 1000;
+              pCycle = 'monthly';
+            } else if (companyBillingType === 'commission') {
+              bModel = 'commission';
+              expDate = new Date(now.getTime() + 365 * 86400000).toISOString();
+              pName = 'সেলস কমিশন মডেল';
+              pFee = 0;
+              commRate = 2;
+            }
+
+            const subPlan: CompanySubscriptionPlan = {
+              planId: companyBillingType === 'trial' ? 'trial' : 'starter',
+              planName: pName,
+              cycle: pCycle,
+              fee: pFee,
+              status: 'active',
+              startDate: nowISO,
+              expiryDate: expDate,
+              autoRenew: true
+            };
+
+            const commCfg: CompanyCommissionConfig = {
+              type: 'percentage',
+              rate: commRate,
+              minCommissionPerSale: 0,
+              totalCommissionAccrued: 0,
+              totalCommissionPaid: 0,
+              commissionDue: 0
+            };
 
             // 1. Create Company Document
             const newCompany: CompanyBranch = {
@@ -226,11 +276,14 @@ const Auth: React.FC<AuthProps> = ({
               invoicePrefix: companyInvoicePrefix.trim() || `INV-${cleanCode}-`,
               status: 'active',
               isDefault: false,
+              billingModel: bModel,
+              subscriptionPlan: subPlan,
+              commissionConfig: commCfg,
               adminEmail: email,
               adminName: companyOwnerName.trim() || companyName.trim(),
               adminPhone: companyPhone.trim(),
-              createdAt: now,
-              updatedAt: now
+              createdAt: nowISO,
+              updatedAt: nowISO
             };
 
             await setDoc(doc(db, 'companies', newCompanyId), newCompany);
@@ -248,7 +301,7 @@ const Auth: React.FC<AuthProps> = ({
               companyName: companyName.trim(),
               status: 'active',
               isApproved: true,
-              joinedDate: now
+              joinedDate: typeof now === 'string' ? now : (now instanceof Date ? now.toISOString() : new Date().toISOString())
             };
 
             await setDoc(doc(db, 'staff', userCredential.user.uid), newAdminStaff);
@@ -580,41 +633,49 @@ const Auth: React.FC<AuthProps> = ({
             </div>
           )}
 
-          {/* Company Signup Sub-Tabs (৪ টি সুবিন্যস্ত ট্যাব) */}
+          {/* Company Signup Sub-Tabs (৫ টি সুবিন্যস্ত ট্যাব) */}
           {authMode === 'register_company' && (
             <div className="mb-6 space-y-2">
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5 bg-slate-100 p-1.5 rounded-2xl border border-slate-200/80">
+              <div className="grid grid-cols-2 sm:grid-cols-5 gap-1.5 bg-slate-100 p-1.5 rounded-2xl border border-slate-200/80">
                 <button
                   type="button"
                   onClick={() => setCompanyStep('info')}
-                  className={`py-2 px-2.5 rounded-xl text-xs font-black flex items-center justify-center gap-1.5 transition-all ${companyStep === 'info' ? 'bg-indigo-600 text-white shadow-xs' : 'text-slate-600 hover:text-slate-900 hover:bg-white/60'}`}
+                  className={`py-2 px-2 rounded-xl text-[11px] font-black flex items-center justify-center gap-1 transition-all ${companyStep === 'info' ? 'bg-indigo-600 text-white shadow-xs' : 'text-slate-600 hover:text-slate-900 hover:bg-white/60'}`}
                 >
-                  <Building2 size={13} />
+                  <Building2 size={12} />
                   <span>১. প্রতিষ্ঠান</span>
                 </button>
                 <button
                   type="button"
                   onClick={() => setCompanyStep('contact')}
-                  className={`py-2 px-2.5 rounded-xl text-xs font-black flex items-center justify-center gap-1.5 transition-all ${companyStep === 'contact' ? 'bg-indigo-600 text-white shadow-xs' : 'text-slate-600 hover:text-slate-900 hover:bg-white/60'}`}
+                  className={`py-2 px-2 rounded-xl text-[11px] font-black flex items-center justify-center gap-1 transition-all ${companyStep === 'contact' ? 'bg-indigo-600 text-white shadow-xs' : 'text-slate-600 hover:text-slate-900 hover:bg-white/60'}`}
                 >
-                  <MapPin size={13} />
+                  <MapPin size={12} />
                   <span>২. যোগাযোগ</span>
                 </button>
                 <button
                   type="button"
                   onClick={() => setCompanyStep('admin')}
-                  className={`py-2 px-2.5 rounded-xl text-xs font-black flex items-center justify-center gap-1.5 transition-all ${companyStep === 'admin' ? 'bg-indigo-600 text-white shadow-xs' : 'text-slate-600 hover:text-slate-900 hover:bg-white/60'}`}
+                  className={`py-2 px-2 rounded-xl text-[11px] font-black flex items-center justify-center gap-1 transition-all ${companyStep === 'admin' ? 'bg-indigo-600 text-white shadow-xs' : 'text-slate-600 hover:text-slate-900 hover:bg-white/60'}`}
                 >
-                  <User size={13} />
+                  <User size={12} />
                   <span>৩. অ্যাডমিন</span>
                 </button>
                 <button
                   type="button"
-                  onClick={() => setCompanyStep('theme')}
-                  className={`py-2 px-2.5 rounded-xl text-xs font-black flex items-center justify-center gap-1.5 transition-all ${companyStep === 'theme' ? 'bg-indigo-600 text-white shadow-xs' : 'text-slate-600 hover:text-slate-900 hover:bg-white/60'}`}
+                  onClick={() => setCompanyStep('billing')}
+                  className={`py-2 px-2 rounded-xl text-[11px] font-black flex items-center justify-center gap-1 transition-all ${companyStep === 'billing' ? 'bg-indigo-600 text-white shadow-xs' : 'text-slate-600 hover:text-slate-900 hover:bg-white/60'}`}
                 >
-                  <Palette size={13} />
-                  <span>৪. থিম ও প্রিভিউ</span>
+                  <CreditCard size={12} />
+                  <span>৪. বিলিং প্ল্যান</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setCompanyStep('theme')}
+                  className={`py-2 px-2 rounded-xl text-[11px] font-black flex items-center justify-center gap-1 transition-all ${companyStep === 'theme' ? 'bg-indigo-600 text-white shadow-xs' : 'text-slate-600 hover:text-slate-900 hover:bg-white/60'}`}
+                >
+                  <Palette size={12} />
+                  <span>৫. প্রিভিউ</span>
                 </button>
               </div>
 
@@ -623,7 +684,7 @@ const Auth: React.FC<AuthProps> = ({
                 <div 
                   className="bg-indigo-600 h-full transition-all duration-300 rounded-full"
                   style={{
-                    width: companyStep === 'info' ? '25%' : companyStep === 'contact' ? '50%' : companyStep === 'admin' ? '75%' : '100%'
+                    width: companyStep === 'info' ? '20%' : companyStep === 'contact' ? '40%' : companyStep === 'admin' ? '60%' : companyStep === 'billing' ? '80%' : '100%'
                   }}
                 />
               </div>
@@ -915,8 +976,102 @@ const Auth: React.FC<AuthProps> = ({
                             return;
                           }
                           setError('');
-                          setCompanyStep('theme');
+                          setCompanyStep('billing');
                         }}
+                        className="w-2/3 py-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-black flex items-center justify-center gap-1.5 transition-all shadow-md shadow-indigo-600/20"
+                      >
+                        <span>পরবর্তী ধাপ: বিলিং প্ল্যান</span>
+                        <ChevronRight size={15} />
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {/* TAB 4: BILLING MODEL & SUBSCRIPTION */}
+                {companyStep === 'billing' && (
+                  <div className="space-y-4 animate-in fade-in">
+                    <div className="p-3 bg-emerald-50/80 border border-emerald-100 rounded-2xl text-xs text-emerald-900 font-bold flex items-center gap-2">
+                      <CreditCard size={18} className="text-emerald-600 shrink-0" />
+                      <span>ধাপ ৪: আপনার কোম্পানির সাবস্ক্রিপশন বা কমিশন পলিসি নির্বাচন করুন</span>
+                    </div>
+
+                    <div className="space-y-3">
+                      {/* Plan 1: 14-day Free Trial */}
+                      <div
+                        onClick={() => setCompanyBillingType('trial')}
+                        className={`p-4 rounded-2xl border-2 cursor-pointer transition-all ${companyBillingType === 'trial' ? 'border-emerald-600 bg-emerald-50/50 shadow-sm' : 'border-slate-200 hover:border-slate-300'}`}
+                      >
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-2.5">
+                            <span className="w-4 h-4 rounded-full border-2 flex items-center justify-center border-emerald-600">
+                              {companyBillingType === 'trial' && <span className="w-2 h-2 rounded-full bg-emerald-600" />}
+                            </span>
+                            <span className="text-xs font-black text-slate-900">🎁 ১৪ দিনের প্রিমিয়াম ফ্রি ট্রায়াল</span>
+                          </div>
+                          <span className="text-[10px] bg-emerald-100 text-emerald-800 font-black px-2.5 py-0.5 rounded-full">
+                            সম্পূর্ণ বিনামূল্যে (৳০)
+                          </span>
+                        </div>
+                        <p className="text-[11px] text-slate-500 font-medium mt-1.5 ml-6 leading-relaxed">
+                          কোনো প্রাথমিক চার্জ ছাড়াই ১৪ দিন পূর্ণ পিওএস, সেলস, বারকোড ও ইনভেন্টরি ফিচার উপভোগ করুন। ট্রায়াল শেষে রিনিউ বা প্ল্যান পরিবর্তন করতে পারবেন।
+                        </p>
+                      </div>
+
+                      {/* Plan 2: Starter Monthly */}
+                      <div
+                        onClick={() => setCompanyBillingType('monthly')}
+                        className={`p-4 rounded-2xl border-2 cursor-pointer transition-all ${companyBillingType === 'monthly' ? 'border-indigo-600 bg-indigo-50/50 shadow-sm' : 'border-slate-200 hover:border-slate-300'}`}
+                      >
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-2.5">
+                            <span className="w-4 h-4 rounded-full border-2 flex items-center justify-center border-indigo-600">
+                              {companyBillingType === 'monthly' && <span className="w-2 h-2 rounded-full bg-indigo-600" />}
+                            </span>
+                            <span className="text-xs font-black text-slate-900">💎 স্টার্টার মাসিক সাবস্ক্রিপশন</span>
+                          </div>
+                          <span className="text-[10px] bg-indigo-100 text-indigo-800 font-black px-2.5 py-0.5 rounded-full">
+                            ৳১,০০০ / মাস
+                          </span>
+                        </div>
+                        <p className="text-[11px] text-slate-500 font-medium mt-1.5 ml-6 leading-relaxed">
+                          আনলিমিটেড প্রোডাক্ট ও সেলস ট্র্যাকিং, ক্লাউড ব্যাকআপ এবং ফুল পিওএস ফিচার প্রতি মাসে নির্দিষ্ট ফি দিয়ে ব্যবহার করুন।
+                        </p>
+                      </div>
+
+                      {/* Plan 3: Sales Commission */}
+                      <div
+                        onClick={() => setCompanyBillingType('commission')}
+                        className={`p-4 rounded-2xl border-2 cursor-pointer transition-all ${companyBillingType === 'commission' ? 'border-purple-600 bg-purple-50/50 shadow-sm' : 'border-slate-200 hover:border-slate-300'}`}
+                      >
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-2.5">
+                            <span className="w-4 h-4 rounded-full border-2 flex items-center justify-center border-purple-600">
+                              {companyBillingType === 'commission' && <span className="w-2 h-2 rounded-full bg-purple-600" />}
+                            </span>
+                            <span className="text-xs font-black text-slate-900">🏷️ সেলস কমিশন ভিত্তিক মডেল</span>
+                          </div>
+                          <span className="text-[10px] bg-purple-100 text-purple-800 font-black px-2.5 py-0.5 rounded-full">
+                            বিক্রির উপর ২% কমিশন
+                          </span>
+                        </div>
+                        <p className="text-[11px] text-slate-500 font-medium mt-1.5 ml-6 leading-relaxed">
+                          মাসিক কোনো ফিক্সড সাবস্ক্রিপশন ফি নেই। পণ্য বিক্রি হলে বিক্রয়মূল্যের উপর মাত্র ২% কমিশন হিসেবে ধার্য হবে।
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="pt-2 flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setCompanyStep('admin')}
+                        className="w-1/3 py-3 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-black flex items-center justify-center gap-1 transition-all"
+                      >
+                        <ChevronLeft size={15} />
+                        <span>আগের ধাপ</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setCompanyStep('theme')}
                         className="w-2/3 py-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-black flex items-center justify-center gap-1.5 transition-all shadow-md shadow-indigo-600/20"
                       >
                         <span>পরবর্তী ধাপ: থিম ও প্রিভিউ</span>
@@ -926,12 +1081,12 @@ const Auth: React.FC<AuthProps> = ({
                   </div>
                 )}
 
-                {/* TAB 4: THEME & LIVE PREVIEW */}
+                {/* TAB 5: THEME & LIVE PREVIEW */}
                 {companyStep === 'theme' && (
                   <div className="space-y-4 animate-in fade-in">
                     <div className="p-3 bg-amber-50/80 border border-amber-100 rounded-2xl text-xs text-amber-900 font-bold flex items-center gap-2">
                       <Palette size={18} className="text-amber-600 shrink-0" />
-                      <span>ধাপ ৪: কোম্পানির হেডার থিম কালার পছন্দ করুন ও লাইভ প্রিভিউ দেখুন</span>
+                      <span>ধাপ ৫: কোম্পানির হেডার থিম কালার পছন্দ করুন ও লাইভ প্রিভিউ দেখুন</span>
                     </div>
 
                     {/* Color Theme Selector */}
@@ -1000,7 +1155,7 @@ const Auth: React.FC<AuthProps> = ({
                     <div className="pt-2 flex items-center gap-2">
                       <button
                         type="button"
-                        onClick={() => setCompanyStep('admin')}
+                        onClick={() => setCompanyStep('billing')}
                         className="w-1/3 py-3 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-black flex items-center justify-center gap-1 transition-all"
                       >
                         <ChevronLeft size={15} />

@@ -428,8 +428,8 @@ const Layout: React.FC<LayoutProps> = ({
           </div>
 
           <div className="flex items-center gap-3">
-            {/* Company / Branch Switcher: Displayed in Master/Main view for Master Owner or Admin */}
-            {(isMasterOwner || isAdmin) && (activeCompanyId === 'all' || activeCompanyId === 'company-main') && companies.length > 0 && (
+            {/* Company / Branch Switcher: Displayed for Master Owner or Admin across all branch and main views */}
+            {(isMasterOwner || isAdmin) && companies.length > 0 && (
               <div className="relative" ref={companyDropdownRef}>
                 <button
                   onClick={() => setCompanyDropdownOpen(!companyDropdownOpen)}
@@ -442,11 +442,11 @@ const Layout: React.FC<LayoutProps> = ({
                   </div>
                   <div className="text-left hidden sm:block max-w-[130px] md:max-w-[170px] truncate">
                     <span className="block text-[10px] text-amber-200 uppercase font-black tracking-wider leading-none">
-                      {activeCompanyId === 'all' ? 'সম্মিলিত ভিউ' : 'প্রধান শাখা'}
+                      {activeCompanyId === 'all' ? 'সম্মিলিত ভিউ' : (companies.find(c => c.id === activeCompanyId)?.isDefault || activeCompanyId === 'company-main' ? 'প্রধান শাখা' : 'ব্রাঞ্চ')}
                     </span>
                     <span className="text-xs font-black truncate block mt-0.5 leading-none">
                       {activeCompanyId === 'all' 
-                        ? 'সকল কোম্পানি (All)' 
+                        ? 'সকল কোম্পানি ও আগের ডেটা (All)' 
                         : (companies.find(c => c.id === activeCompanyId)?.name || 'REST BAZER')}
                     </span>
                   </div>
@@ -479,8 +479,8 @@ const Layout: React.FC<LayoutProps> = ({
                             <Globe size={15} />
                           </div>
                           <div>
-                            <div className="text-xs font-black text-slate-900">সকল কোম্পানি / সম্মিলিত ভিউ</div>
-                            <div className="text-[10px] text-slate-500 font-medium">সব ব্রাঞ্চের মোট স্টক, সেলস ও ডেটা</div>
+                            <div className="text-xs font-black text-slate-900">সকল কোম্পানি / আগের সকল তথ্য (All Data)</div>
+                            <div className="text-[10px] text-slate-500 font-medium">আগের সকল সেলস, স্টক ও সব ব্রাঞ্চের মোট হিসাব</div>
                           </div>
                         </div>
                         {activeCompanyId === 'all' && (
@@ -1060,6 +1060,37 @@ const Layout: React.FC<LayoutProps> = ({
 
         <main className="flex-1 overflow-y-auto bg-slate-50 relative pb-24 lg:pb-0 scroll-smooth custom-scrollbar">
           <div className="p-4 md:p-8 max-w-7xl mx-auto min-h-full">
+            {activeCompanyId && activeCompanyId !== 'all' && (
+              <div className="mb-6 p-4 bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 text-white rounded-2xl border border-indigo-500/30 shadow-md flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-xs animate-in fade-in duration-200">
+                <div className="flex items-center gap-3 min-w-0">
+                  <div className="w-9 h-9 rounded-xl bg-amber-400 text-slate-950 flex items-center justify-center font-black shrink-0 shadow-sm">
+                    <Building2 size={18} />
+                  </div>
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="text-[10px] font-black uppercase tracking-wider bg-amber-400/20 text-amber-300 px-2.5 py-0.5 rounded-full border border-amber-400/30">
+                        ব্রাঞ্চ ফিল্টার চালু আছে
+                      </span>
+                      <span className="font-black text-amber-300 text-sm truncate">
+                        {companies.find(c => c.id === activeCompanyId)?.name || 'নির্দিষ্ট ব্রাঞ্চ'}
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-slate-300 font-medium mt-0.5">
+                      বর্তমানে শুধুমাত্র এই নির্দিষ্ট ব্রাঞ্চের ডেটা দেখাচ্ছে। পূর্বের সকল সেলস, স্টক ও সব তথ্য দেখতে পাশের বাটনে চাপুন।
+                    </p>
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => onSelectCompany && onSelectCompany('all')}
+                  className="px-4 py-2 bg-gradient-to-r from-amber-400 to-amber-500 hover:from-amber-500 hover:to-amber-600 text-slate-950 font-black rounded-xl text-xs transition-all shadow-md flex items-center gap-1.5 shrink-0 active:scale-95"
+                >
+                  <Globe size={15} />
+                  <span>আগের সব তথ্য ও সব ব্রাঞ্চের ডেটা দেখুন (All Data)</span>
+                </button>
+              </div>
+            )}
             {children}
           </div>
         </main>

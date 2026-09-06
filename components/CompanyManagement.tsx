@@ -1,5 +1,5 @@
 import React, { useState, useRef } from 'react';
-import { CompanyBranch, Product, Sale, Staff } from '../types';
+import { CompanyBranch, Product, Sale, Staff, CompanyBillingRecord, ShopSettings } from '../types';
 import { 
   Building2, Plus, Edit, Trash2, Check, CheckCircle2, 
   MapPin, Phone, Mail, Globe, Shield, Star, RefreshCw, 
@@ -7,11 +7,13 @@ import {
   Palette, Tag, AlertTriangle, Eye, Layers, DollarSign,
   Download, BarChart3, Users, Package, ShoppingCart, Lock,
   Copy, UserCheck, KeyRound, ExternalLink, ShieldCheck,
-  Share2, QrCode, MessageSquare, Send, Smartphone, Laptop, Link as LinkIcon
+  Share2, QrCode, MessageSquare, Send, Smartphone, Laptop, Link as LinkIcon,
+  CreditCard
 } from 'lucide-react';
 import { HEADER_COLOR_PRESETS } from './Layout';
 import { db } from '../services/firebase';
 import { doc, setDoc, collection, query, where, getDocs } from 'firebase/firestore';
+import { CompanySubscriptionBilling } from './CompanySubscriptionBilling';
 
 interface CompanyManagementProps {
   companies: CompanyBranch[];
@@ -25,6 +27,9 @@ interface CompanyManagementProps {
   sales?: Sale[];
   staff?: Staff[];
   isAdmin?: boolean;
+  billingRecords?: CompanyBillingRecord[];
+  onSaveBillingRecord?: (record: CompanyBillingRecord) => Promise<void>;
+  shopSettings?: ShopSettings;
 }
 
 export const CompanyManagement: React.FC<CompanyManagementProps> = ({
@@ -38,9 +43,14 @@ export const CompanyManagement: React.FC<CompanyManagementProps> = ({
   products = [],
   sales = [],
   staff = [],
-  isAdmin = true
+  isAdmin = true,
+  billingRecords = [],
+  onSaveBillingRecord,
+  shopSettings
 }) => {
   const setDefaultHandler = onSetDefaultCompany || onSetDefault || (() => {});
+  const [currentTab, setCurrentTab] = useState<'companies' | 'billing'>('companies');
+  const [selectedBillingCompanyId, setSelectedBillingCompanyId] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [filterStatus, setFilterStatus] = useState<'all' | 'active' | 'inactive'>('all');
   const [showModal, setShowModal] = useState(false);
@@ -188,7 +198,24 @@ export const CompanyManagement: React.FC<CompanyManagementProps> = ({
       adminEmail: '',
       adminName: '',
       adminPhone: '',
-      adminPassword: ''
+      adminPassword: '',
+      billingModel: 'free_trial',
+      subscriptionPlan: {
+        planId: 'trial',
+        planName: '১৪ দিনের ফ্রি ট্রায়াল',
+        billingCycle: 'trial',
+        fee: 0,
+        startDate: new Date().toISOString(),
+        renewalDate: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString(),
+        status: 'active'
+      },
+      commissionConfig: {
+        type: 'percentage',
+        rate: 5,
+        minPayoutAmount: 500,
+        payoutCycle: 'monthly',
+        status: 'active'
+      }
     });
     setShowModal(true);
   };
@@ -197,6 +224,23 @@ export const CompanyManagement: React.FC<CompanyManagementProps> = ({
     setEditingCompany(comp);
     setFormData({
       ...comp,
+      billingModel: comp.billingModel || 'free_trial',
+      subscriptionPlan: comp.subscriptionPlan || {
+        planId: 'trial',
+        planName: '১৪ দিনের ফ্রি ট্রায়াল',
+        billingCycle: 'trial',
+        fee: 0,
+        startDate: new Date().toISOString(),
+        renewalDate: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString(),
+        status: 'active'
+      },
+      commissionConfig: comp.commissionConfig || {
+        type: 'percentage',
+        rate: 5,
+        minPayoutAmount: 500,
+        payoutCycle: 'monthly',
+        status: 'active'
+      },
       adminPassword: ''
     });
     setShowModal(true);
@@ -222,17 +266,31 @@ export const CompanyManagement: React.FC<CompanyManagementProps> = ({
       setIsSaving(true);
       const now = new Date().toISOString();
       const companyId = editingCompany ? editingCompany.id : `comp-${Date.now()}`;
+      const trimmedName = formData.name.trim();
+      
+      // Determine appropriate headerTitle
+      let finalHeaderTitle = trimmedName;
+      if (formData.headerTitle && formData.headerTitle.trim() !== '') {
+        // If headerTitle was just the previous name or match, update it
+        if (editingCompany && (formData.headerTitle === editingCompany.name || formData.headerTitle === editingCompany.headerTitle)) {
+          finalHeaderTitle = trimmedName;
+        } else {
+          finalHeaderTitle = formData.headerTitle.trim();
+        }
+      }
       
       const compToSave: CompanyBranch = {
+        ...(editingCompany || {}),
+        ...formData,
         id: companyId,
-        name: formData.name.trim(),
+        name: trimmedName,
         code: formData.code?.trim() || `CMP-${Math.floor(10 + Math.random() * 90)}`,
         phone: formData.phone || '',
         email: formData.email || '',
         address: formData.address || '',
         currency: formData.currency || '৳',
         logoUrl: formData.logoUrl || '',
-        headerTitle: formData.headerTitle || formData.name,
+        headerTitle: finalHeaderTitle,
         headerSubtitle: formData.headerSubtitle || '',
         headerBgColor: formData.headerBgColor || '#1e1e5f',
         headerTextColor: formData.headerTextColor || '#ffffff',
@@ -245,6 +303,9 @@ export const CompanyManagement: React.FC<CompanyManagementProps> = ({
         adminEmail: formData.adminEmail?.trim() || formData.email?.trim() || '',
         adminName: formData.adminName?.trim() || '',
         adminPhone: formData.adminPhone?.trim() || formData.phone?.trim() || '',
+        billingModel: formData.billingModel || 'free_trial',
+        subscriptionPlan: formData.subscriptionPlan,
+        commissionConfig: formData.commissionConfig,
         createdAt: editingCompany?.createdAt || now,
         updatedAt: now
       };
@@ -440,7 +501,66 @@ export const CompanyManagement: React.FC<CompanyManagementProps> = ({
         </div>
       </div>
 
-      {/* Filter & Search Bar */}
+      {/* Navigation Tabs: Companies vs Subscription/Commission Billing */}
+      <div className="flex items-center justify-between flex-wrap gap-3 bg-white p-2.5 rounded-2xl border border-slate-200/80 shadow-xs">
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => setCurrentTab('companies')}
+            className={`px-4 py-2.5 rounded-xl text-xs font-black transition-all flex items-center gap-2 ${
+              currentTab === 'companies'
+                ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/20'
+                : 'bg-slate-100 hover:bg-slate-200 text-slate-700'
+            }`}
+          >
+            <Building2 size={15} /> কোম্পানি ও ব্রাঞ্চসমূহ ({companies.length})
+          </button>
+          <button
+            type="button"
+            onClick={() => setCurrentTab('billing')}
+            className={`px-4 py-2.5 rounded-xl text-xs font-black transition-all flex items-center gap-2 ${
+              currentTab === 'billing'
+                ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/20'
+                : 'bg-slate-100 hover:bg-slate-200 text-slate-700'
+            }`}
+          >
+            <CreditCard size={15} className={currentTab === 'billing' ? 'text-amber-300' : 'text-amber-500'} /> সাবস্ক্রিপশন ও কমিশন বিলিং
+          </button>
+        </div>
+
+        {currentTab === 'billing' && (
+          <div className="flex items-center gap-2 text-xs font-bold text-slate-600">
+            <span>ফিল্টার কোম্পানি:</span>
+            <select
+              value={selectedBillingCompanyId || 'all'}
+              onChange={e => setSelectedBillingCompanyId(e.target.value === 'all' ? null : e.target.value)}
+              className="px-3 py-1.5 bg-slate-100 border border-slate-200 rounded-xl text-xs font-bold text-slate-800"
+            >
+              <option value="all">সকল কোম্পানি এক সাথে</option>
+              {companies.map(c => (
+                <option key={c.id} value={c.id}>{c.name}</option>
+              ))}
+            </select>
+          </div>
+        )}
+      </div>
+
+      {currentTab === 'billing' ? (
+        <CompanySubscriptionBilling
+          companies={companies}
+          sales={sales}
+          billingRecords={billingRecords}
+          shopSettings={shopSettings || { name: 'REST BAZER', currency: '৳' }}
+          activeCompanyId={selectedBillingCompanyId || activeCompanyId}
+          isAdmin={isAdmin}
+          onSaveCompany={async (comp) => {
+            await onSaveCompany(comp);
+          }}
+          onSaveBillingRecord={onSaveBillingRecord}
+        />
+      ) : (
+        <>
+          {/* Filter & Search Bar */}
       <div className="bg-white p-4 rounded-2xl border border-slate-200/80 shadow-xs flex flex-col sm:flex-row items-center justify-between gap-3">
         <div className="relative w-full sm:w-80">
           <Search size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
@@ -614,6 +734,33 @@ export const CompanyManagement: React.FC<CompanyManagementProps> = ({
                   </div>
                 </div>
 
+                {/* Billing Model Badge & Direct Billing Link */}
+                <div className="flex items-center justify-between p-2.5 bg-amber-50/70 rounded-2xl border border-amber-200/70 text-xs">
+                  <div className="flex items-center gap-1.5 min-w-0">
+                    <CreditCard size={13} className="text-amber-600 shrink-0" />
+                    <span className="font-black text-slate-800 truncate text-[11px]">
+                      {comp.billingModel === 'commission'
+                        ? `কমিশন (${comp.commissionConfig?.rate ?? 0}${comp.commissionConfig?.type === 'fixed' ? '৳' : '%'})`
+                        : comp.billingModel === 'monthly_subscription'
+                        ? `সাবস্ক্রিপশন (৳${(comp.subscriptionPlan?.fee || 0).toLocaleString()}/${comp.subscriptionPlan?.billingCycle === 'yearly' ? 'বছর' : 'মাস'})`
+                        : comp.billingModel === 'hybrid'
+                        ? `হাইব্রিড (সাবস্ক্রিপশন + কমিশন)`
+                        : '১৪ দিন ট্রায়াল'}
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSelectedBillingCompanyId(comp.id);
+                      setCurrentTab('billing');
+                    }}
+                    className="text-[10px] font-black text-indigo-600 hover:text-indigo-800 bg-white px-2 py-0.5 rounded-lg border border-indigo-200 shrink-0 active:scale-95 transition-all shadow-xs"
+                    title="এই কোম্পানির সাবস্ক্রিপশন ও কমিশন বিলিং লেজার দেখুন"
+                  >
+                    বিলিং হিসাব ↗
+                  </button>
+                </div>
+
                 {/* Branch Live Metrics */}
                 <div className="grid grid-cols-3 gap-2 bg-slate-50 p-3 rounded-2xl border border-slate-100 text-center">
                   <div>
@@ -758,6 +905,8 @@ export const CompanyManagement: React.FC<CompanyManagementProps> = ({
           )}
         </div>
       )}
+        </>
+      )}
 
       {/* Add/Edit Modal */}
       {showModal && (
@@ -805,7 +954,19 @@ export const CompanyManagement: React.FC<CompanyManagementProps> = ({
                       required
                       placeholder="যেমন: REST BAZER (উত্তরা ব্রাঞ্চ)"
                       value={formData.name || ''}
-                      onChange={e => setFormData(prev => ({ ...prev, name: e.target.value, headerTitle: prev.headerTitle || e.target.value }))}
+                      onChange={e => {
+                        const newName = e.target.value;
+                        setFormData(prev => {
+                          const wasSameAsOld = !prev.headerTitle || 
+                                               prev.headerTitle === prev.name || 
+                                               (editingCompany && (prev.headerTitle === editingCompany.name || prev.headerTitle === editingCompany.headerTitle));
+                          return {
+                            ...prev,
+                            name: newName,
+                            headerTitle: wasSameAsOld ? newName : prev.headerTitle
+                          };
+                        });
+                      }}
                       className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-800 focus:ring-2 focus:ring-indigo-500 focus:bg-white transition-all"
                     />
                   </div>
@@ -1031,6 +1192,132 @@ export const CompanyManagement: React.FC<CompanyManagementProps> = ({
                     />
                   </div>
                 </div>
+              </div>
+
+              {/* Billing Model & Subscription / Commission Section */}
+              <div className="space-y-3 pt-4 border-t border-slate-100">
+                <div className="flex items-center justify-between">
+                  <h4 className="text-xs font-black uppercase text-indigo-600 tracking-wider flex items-center gap-1.5">
+                    <CreditCard size={14} className="text-amber-500" /> বিলিং মডেল ও চার্জ পলিসি (Subscription & Commission)
+                  </h4>
+                  <span className="text-[10px] font-bold text-slate-400">নতুন কোম্পানি থেকে চার্জ পদ্ধতি</span>
+                </div>
+
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                  {[
+                    { id: 'free_trial', label: '১৪ দিন ট্রায়াল', icon: '🎁', desc: 'কোনো চার্জ নেই' },
+                    { id: 'monthly_subscription', label: 'ফিক্সড সাবস্ক্রিপশন', icon: '📅', desc: 'মাসিক/বাৎসরিক ফি' },
+                    { id: 'commission', label: 'সেলস কমিশন', icon: '💰', desc: '% বা ফিক্সড টাকা' },
+                    { id: 'hybrid', label: 'হাইব্রিড মডেল', icon: '⚡', desc: 'সাবস্ক্রিপশন + কমিশন' },
+                  ].map(m => (
+                    <button
+                      key={m.id}
+                      type="button"
+                      onClick={() => setFormData(prev => ({ ...prev, billingModel: m.id as any }))}
+                      className={`p-3 rounded-2xl border text-left transition-all ${
+                        (formData.billingModel || 'free_trial') === m.id
+                          ? 'bg-indigo-50/90 border-indigo-600 text-indigo-950 ring-2 ring-indigo-500/20 shadow-xs'
+                          : 'bg-slate-50/70 border-slate-200 text-slate-700 hover:bg-slate-100'
+                      }`}
+                    >
+                      <div className="text-base">{m.icon}</div>
+                      <div className="text-xs font-black mt-1 leading-tight">{m.label}</div>
+                      <div className="text-[10px] text-slate-500 font-medium mt-0.5">{m.desc}</div>
+                    </button>
+                  ))}
+                </div>
+
+                {/* Subscription options */}
+                {((formData.billingModel === 'monthly_subscription') || (formData.billingModel === 'hybrid')) && (
+                  <div className="p-3.5 bg-blue-50/60 border border-blue-200/70 rounded-2xl space-y-3">
+                    <div className="text-xs font-black text-blue-900 flex items-center gap-1.5">
+                      <Sparkles size={13} className="text-blue-600" /> সাবস্ক্রিপশন প্যাকেজ নির্বাচন
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                      {[
+                        { id: 'starter', name: 'স্টার্টার', fee: 1000, cycle: 'monthly' },
+                        { id: 'professional', name: 'প্রফেশনাল', fee: 2000, cycle: 'monthly' },
+                        { id: 'enterprise_yearly', name: 'এন্টারপ্রাইজ (বছর)', fee: 20000, cycle: 'yearly' },
+                      ].map(plan => (
+                        <button
+                          key={plan.id}
+                          type="button"
+                          onClick={() => setFormData(prev => ({
+                            ...prev,
+                            subscriptionPlan: {
+                              planId: plan.id,
+                              planName: plan.name,
+                              billingCycle: plan.cycle as any,
+                              fee: plan.fee,
+                              startDate: prev.subscriptionPlan?.startDate || new Date().toISOString(),
+                              renewalDate: new Date(Date.now() + (plan.cycle === 'yearly' ? 365 : 30) * 24 * 60 * 60 * 1000).toISOString(),
+                              status: 'active'
+                            }
+                          }))}
+                          className={`p-2.5 rounded-xl border text-center transition-all ${
+                            formData.subscriptionPlan?.planId === plan.id
+                              ? 'bg-blue-600 text-white font-black border-blue-600 shadow-xs'
+                              : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50 font-bold'
+                          }`}
+                        >
+                          <div className="text-xs">{plan.name}</div>
+                          <div className="text-xs font-black mt-0.5">৳{plan.fee.toLocaleString()}/{plan.cycle === 'yearly' ? 'বছর' : 'মাস'}</div>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Commission options */}
+                {((formData.billingModel === 'commission') || (formData.billingModel === 'hybrid')) && (
+                  <div className="p-3.5 bg-amber-50/60 border border-amber-200/70 rounded-2xl space-y-3">
+                    <div className="text-xs font-black text-amber-900 flex items-center gap-1.5">
+                      <DollarSign size={13} className="text-amber-600" /> সেলস কমিশন হার নির্ধারণ
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <div className="space-y-1">
+                        <label className="text-[11px] font-bold text-slate-700">কমিশনের ধরন</label>
+                        <select
+                          value={formData.commissionConfig?.type || 'percentage'}
+                          onChange={e => setFormData(prev => ({
+                            ...prev,
+                            commissionConfig: {
+                              ...(prev.commissionConfig || { minPayoutAmount: 500, payoutCycle: 'monthly', status: 'active' }),
+                              type: e.target.value as any,
+                              rate: prev.commissionConfig?.rate || 5
+                            }
+                          }))}
+                          className="w-full px-3 py-2 bg-white border border-amber-200 rounded-xl text-xs font-bold text-slate-800"
+                        >
+                          <option value="percentage">শতকরা হার (% Percentage per sale)</option>
+                          <option value="fixed">ফিক্সড টাকা (৳ Fixed per sale)</option>
+                        </select>
+                      </div>
+                      <div className="space-y-1">
+                        <label className="text-[11px] font-bold text-slate-700">
+                          {formData.commissionConfig?.type === 'fixed' ? 'প্রতি বিক্রয়ে কমিশন (৳)' : 'কমিশনের হার (% শতাংশ)'}
+                        </label>
+                        <input
+                          type="number"
+                          min="0"
+                          step="0.5"
+                          value={formData.commissionConfig?.rate ?? 5}
+                          onChange={e => {
+                            const val = parseFloat(e.target.value) || 0;
+                            setFormData(prev => ({
+                              ...prev,
+                              commissionConfig: {
+                                ...(prev.commissionConfig || { type: 'percentage', minPayoutAmount: 500, payoutCycle: 'monthly', status: 'active' }),
+                                rate: val
+                              }
+                            }));
+                          }}
+                          className="w-full px-3 py-2 bg-white border border-amber-200 rounded-xl text-xs font-bold text-slate-800"
+                        />
+                      </div>
+                    </div>
+                  </div>
+                )}
               </div>
 
               {/* Status & Options */}

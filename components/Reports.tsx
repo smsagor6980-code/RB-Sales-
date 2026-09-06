@@ -401,57 +401,111 @@ const Reports: React.FC<ReportsProps> = ({
       </div>
 
       {/* Date & Global Filters */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-5 print:hidden">
-        <div className="bg-white p-4 sm:p-5 rounded-2xl sm:rounded-[32px] border-2 border-slate-50 shadow-xs space-y-1.5">
-           <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-2">
-             <Calendar size={13} className="text-primary"/> শুরুর তারিখ
-           </label>
-           <input 
-             type="date" 
-             value={startDate} 
-             onChange={e => setStartDate(e.target.value)} 
-             className="w-full bg-slate-50 border-none rounded-xl p-3 font-black text-xs sm:text-sm outline-none focus:ring-2 focus:ring-primary/20"
-           />
+      <div className="bg-white p-4 rounded-2xl sm:rounded-[28px] border-2 border-slate-100 shadow-xs space-y-3 print:hidden">
+        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 pb-2.5">
+          <span className="text-[11px] font-black text-slate-500 uppercase tracking-wider flex items-center gap-1.5">
+            <Clock size={13} className="text-primary" /> দ্রুত সময় ফিল্টার:
+          </span>
+          <div className="flex flex-wrap items-center gap-1.5">
+            <button
+              type="button"
+              onClick={() => {
+                const today = getLocalDateString();
+                setStartDate(today);
+                setEndDate(today);
+              }}
+              className="px-2.5 py-1 text-xs font-bold rounded-lg bg-slate-100 hover:bg-indigo-50 hover:text-indigo-600 transition-colors"
+            >
+              আজকে
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setStartDate(getLocalFirstDayOfMonth());
+                setEndDate(getLocalDateString());
+              }}
+              className="px-2.5 py-1 text-xs font-bold rounded-lg bg-slate-100 hover:bg-indigo-50 hover:text-indigo-600 transition-colors"
+            >
+              এই মাসে
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                const now = new Date();
+                const firstDayPrevMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+                const lastDayPrevMonth = new Date(now.getFullYear(), now.getMonth(), 0);
+                setStartDate(getLocalDateString(firstDayPrevMonth));
+                setEndDate(getLocalDateString(lastDayPrevMonth));
+              }}
+              className="px-2.5 py-1 text-xs font-bold rounded-lg bg-slate-100 hover:bg-indigo-50 hover:text-indigo-600 transition-colors"
+            >
+              গত মাসে
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setStartDate('2020-01-01');
+                setEndDate(getLocalDateString());
+              }}
+              className="px-3 py-1 text-xs font-black rounded-lg bg-indigo-600 text-white hover:bg-indigo-700 shadow-xs transition-all flex items-center gap-1"
+            >
+              <RotateCcw size={11} /> আগের সব তথ্য (All Time)
+            </button>
+          </div>
         </div>
-        <div className="bg-white p-4 sm:p-5 rounded-2xl sm:rounded-[32px] border-2 border-slate-50 shadow-xs space-y-1.5">
-           <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-2">
-             <Calendar size={13} className="text-primary"/> শেষ তারিখ
-           </label>
-           <input 
-             type="date" 
-             value={endDate} 
-             onChange={e => setEndDate(e.target.value)} 
-             className="w-full bg-slate-50 border-none rounded-xl p-3 font-black text-xs sm:text-sm outline-none focus:ring-2 focus:ring-primary/20"
-           />
-        </div>
-        <div className="bg-white p-4 sm:p-5 rounded-2xl sm:rounded-[32px] border-2 border-slate-50 shadow-xs space-y-1.5">
-           <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-2">
-             <Layers size={13} className="text-primary"/> সেলস চ্যানেল
-           </label>
-           <select 
-             value={channelFilter} 
-             onChange={e => setChannelFilter(e.target.value as any)} 
-             className="w-full bg-slate-50 border-none rounded-xl p-3 font-black text-xs sm:text-sm outline-none appearance-none cursor-pointer"
-           >
-              <option value="all">সকল চ্যানেল (All Channels)</option>
-              <option value="retail">খুচরা বিক্রয় (Retail)</option>
-              <option value="wholesale">পাইকারি বিক্রয় (Wholesale)</option>
-              <option value="distributor">ডিলার / পরিবেশক (Distributor)</option>
-           </select>
-        </div>
-        <div className="bg-white p-4 sm:p-5 rounded-2xl sm:rounded-[32px] border-2 border-slate-50 shadow-xs space-y-1.5">
-           <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-2">
-             <Users size={13} className="text-primary"/> স্টাফ ফিল্টার
-           </label>
-           <select 
-             disabled={!isAdmin} 
-             value={selectedStaffId} 
-             onChange={e => setSelectedStaffId(e.target.value)} 
-             className="w-full bg-slate-50 border-none rounded-xl p-3 font-black text-xs sm:text-sm outline-none appearance-none cursor-pointer disabled:opacity-50"
-           >
-              <option value="all">সকল স্টাফ (All Personnel)</option>
-              {allStaff.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-           </select>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+          <div className="bg-slate-50 p-3.5 rounded-xl border border-slate-100 space-y-1">
+             <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-2">
+               <Calendar size={13} className="text-primary"/> শুরুর তারিখ
+             </label>
+             <input 
+               type="date" 
+               value={startDate} 
+               onChange={e => setStartDate(e.target.value)} 
+               className="w-full bg-white border border-slate-200 rounded-lg p-2.5 font-black text-xs outline-none focus:ring-2 focus:ring-primary/20"
+             />
+          </div>
+          <div className="bg-slate-50 p-3.5 rounded-xl border border-slate-100 space-y-1">
+             <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-2">
+               <Calendar size={13} className="text-primary"/> শেষ তারিখ
+             </label>
+             <input 
+               type="date" 
+               value={endDate} 
+               onChange={e => setEndDate(e.target.value)} 
+               className="w-full bg-white border border-slate-200 rounded-lg p-2.5 font-black text-xs outline-none focus:ring-2 focus:ring-primary/20"
+             />
+          </div>
+          <div className="bg-slate-50 p-3.5 rounded-xl border border-slate-100 space-y-1">
+             <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-2">
+               <Layers size={13} className="text-primary"/> সেলস চ্যানেল
+             </label>
+             <select 
+               value={channelFilter} 
+               onChange={e => setChannelFilter(e.target.value as any)} 
+               className="w-full bg-white border border-slate-200 rounded-lg p-2.5 font-black text-xs outline-none appearance-none cursor-pointer"
+             >
+                <option value="all">সকল চ্যানেল (All Channels)</option>
+                <option value="retail">খুচরা বিক্রয় (Retail)</option>
+                <option value="wholesale">পাইকারি বিক্রয় (Wholesale)</option>
+                <option value="distributor">ডিলার / পরিবেশক (Distributor)</option>
+             </select>
+          </div>
+          <div className="bg-slate-50 p-3.5 rounded-xl border border-slate-100 space-y-1">
+             <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-2">
+               <Users size={13} className="text-primary"/> স্টাফ ফিল্টার
+             </label>
+             <select 
+               disabled={!isAdmin} 
+               value={selectedStaffId} 
+               onChange={e => setSelectedStaffId(e.target.value)} 
+               className="w-full bg-white border border-slate-200 rounded-lg p-2.5 font-black text-xs outline-none appearance-none cursor-pointer disabled:opacity-50"
+             >
+                <option value="all">সকল স্টাফ (All Personnel)</option>
+                {allStaff.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+             </select>
+          </div>
         </div>
       </div>
 

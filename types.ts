@@ -1,3 +1,63 @@
+export type CompanyBillingModel = 'subscription' | 'commission' | 'hybrid' | 'free';
+
+export interface CompanySubscriptionPlan {
+  planId: 'trial' | 'starter' | 'professional' | 'enterprise' | 'custom';
+  planName: string;
+  cycle: 'monthly' | 'quarterly' | 'yearly' | 'lifetime' | 'trial';
+  fee: number;
+  status: 'active' | 'trial' | 'expired' | 'suspended' | 'pending_payment';
+  startDate: string;
+  expiryDate: string;
+  trialDaysRemaining?: number;
+  maxProducts?: number;
+  maxStaff?: number;
+  autoRenew?: boolean;
+  lastPaymentDate?: string;
+  nextBillingDate?: string;
+}
+
+export interface CompanyCommissionConfig {
+  type: 'percentage' | 'fixed_per_sale';
+  rate: number; // e.g. 2 for 2%, or 20 for ৳20 per sale
+  minCommissionPerSale?: number;
+  maxCommissionPerSale?: number;
+  appliesTo?: 'all_sales' | 'retail_only' | 'wholesale_only';
+  totalCommissionAccrued?: number;
+  totalCommissionPaid?: number;
+  commissionDue?: number;
+  lastSettlementDate?: string;
+}
+
+export interface CompanyBillingRecord {
+  id: string;
+  companyId: string;
+  companyName: string;
+  type: 'subscription' | 'commission' | 'commission_settlement' | 'setup_fee';
+  title?: string;
+  description?: string;
+  dueDate?: string;
+  invoiceNo?: string;
+  saleId?: string;
+  saleAmount?: number;
+  planName?: string;
+  cycle?: string;
+  periodStart?: string;
+  periodEnd?: string;
+  amount: number;
+  paidAmount?: number;
+  dueAmount?: number;
+  status: 'paid' | 'pending' | 'overdue' | 'waived';
+  paymentMethod?: string;
+  trxId?: string;
+  notes?: string;
+  salesCount?: number;
+  totalSalesVolume?: number;
+  commissionRate?: number;
+  createdAt: string;
+  paidAt?: string;
+  createdByName?: string;
+}
+
 export interface CompanyBranch {
   id: string;
   name: string;
@@ -20,6 +80,10 @@ export interface CompanyBranch {
   adminEmail?: string;
   adminName?: string;
   adminPhone?: string;
+  // Commission & Subscription Fields
+  billingModel?: CompanyBillingModel;
+  subscriptionPlan?: CompanySubscriptionPlan;
+  commissionConfig?: CompanyCommissionConfig;
   createdAt: string;
   updatedAt?: string;
 }
@@ -874,6 +938,9 @@ export interface Sale {
   originalItems?: CartItem[];
   undeliveredItems?: UndeliveredItemSummary[];
   undeliveredInvoiceNo?: string;
+  commissionAmount?: number;
+  commissionRate?: number;
+  commissionType?: 'percentage' | 'fixed_per_sale';
 }
 
 export interface ProductReturn {

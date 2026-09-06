@@ -49,8 +49,10 @@ service cloud.firestore {
     function isAdmin() {
       return isAuthenticated() && (
         isOwnerEmail() ||
-        (exists(/databases/$(database)/documents/staff/$(request.auth.uid)) && 
-         get(/databases/$(database)/documents/staff/$(request.auth.uid)).data.designation in ['Admin', 'Owner', 'Manager'])
+        (exists(/databases/$(database)/documents/staff/$(request.auth.uid)) && (
+          get(/databases/$(database)/documents/staff/$(request.auth.uid)).data.designation in ['Admin', 'Owner', 'Manager', 'admin', 'owner', 'manager', 'Super Admin', 'super admin', 'Company Admin', 'company admin', 'মালিক', 'এডমিন', 'ম্যানেজার'] ||
+          get(/databases/$(database)/documents/staff/$(request.auth.uid)).data.get('roleId', '') in ['admin', 'owner']
+        ))
       );
     }
 
@@ -226,7 +228,14 @@ service cloud.firestore {
     
     match /companies/{companyId} {
       allow read: if true;
-      allow write: if isAdmin();
+      allow write: if isAdmin() || (isAuthenticated() && (
+        (resource != null && (
+          resource.data.get('adminEmail', '') == request.auth.token.email ||
+          resource.data.get('email', '') == request.auth.token.email
+        )) ||
+        request.resource.data.get('adminEmail', '') == request.auth.token.email ||
+        request.resource.data.get('email', '') == request.auth.token.email
+      ));
     }
     
     match /settings/{settingId} {
@@ -250,6 +259,11 @@ service cloud.firestore {
       allow read: if isApprovedStaff() || (isAuthenticated() && resource.data.customerId == request.auth.uid);
       allow create: if isAuthenticated();
       allow update, delete: if isApprovedStaff();
+    }
+
+    match /billing_records/{recordId} {
+      allow read: if isApprovedStaff() || isAdmin();
+      allow write: if isApprovedStaff() || isAdmin();
     }
   }
 }

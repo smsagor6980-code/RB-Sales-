@@ -32,7 +32,7 @@ interface FirestoreErrorInfo {
   }
 }
 
-import { Product, Customer, Sale, Collection, Activity, Expense, ProductCategory, Staff, Supplier, RankConfig, AppRole, ProductReturn, Purchase, Attendance, LeaveRequest, Payroll, AdvanceLoan, CustomerLoan, CustomerLoanRepayment, ExpenseReimbursement, WishlistItem, AppNotification, CartItem, ShopSettings, SupplierPayment, SupplierReturn, StockEntry, ProductionBatch, CompanyLoan, CompanyBranch, WalletTransaction } from './types';
+import { Product, Customer, Sale, Collection, Activity, Expense, ProductCategory, Staff, Supplier, RankConfig, AppRole, ProductReturn, Purchase, Attendance, LeaveRequest, Payroll, AdvanceLoan, CustomerLoan, CustomerLoanRepayment, ExpenseReimbursement, WishlistItem, AppNotification, CartItem, ShopSettings, SupplierPayment, SupplierReturn, StockEntry, ProductionBatch, CompanyLoan, CompanyBranch, WalletTransaction, CompanyBillingRecord } from './types';
 import Layout from './components/Layout';
 import Auth from './components/Auth';
 import Dashboard from './components/Dashboard';
@@ -173,13 +173,14 @@ const App: React.FC = () => {
   const [companyLoans, setCompanyLoans] = useState<CompanyLoan[]>([]);
   const [reimbursements, setReimbursements] = useState<ExpenseReimbursement[]>([]);
   
-  // Multi-Company / Branch State
+  // Multi-Company / Branch & Billing State
   const [companies, setCompanies] = useState<CompanyBranch[]>([]);
+  const [billingRecords, setBillingRecords] = useState<CompanyBillingRecord[]>([]);
   const [activeCompanyId, setActiveCompanyId] = useState<string>(() => {
     try {
-      return localStorage.getItem('active_company_id') || 'company-main';
+      return localStorage.getItem('active_company_id') || 'all';
     } catch (e) {
-      return 'company-main';
+      return 'all';
     }
   });
 
@@ -204,30 +205,31 @@ const App: React.FC = () => {
     } catch (e) { return []; }
   };
 
-  const DEFAULT_MAIN_COMPANY: CompanyBranch = {
+  const defaultMainCompany: CompanyBranch = useMemo(() => ({
     id: 'company-main',
-    name: 'REST BAZER (প্রধান শাখা)',
+    name: shopSettings?.name || shopSettings?.headerTitle || 'REST BAZER (প্রধান শাখা)',
     code: 'HQ-01',
-    phone: '017XXXXXXXX',
-    email: 'info@restbazer.com',
-    address: 'Savar, Dhaka, Bangladesh',
-    currency: '৳',
-    headerTitle: 'REST BAZER',
-    headerSubtitle: 'স্মার্ট ইনভেন্টরি ও সেলস ম্যানেজমেন্ট',
-    headerBgColor: '#1e1e5f',
-    headerTextColor: '#ffffff',
-    headerSubtitleColor: '#fcd34d',
-    tagline: 'স্মার্ট ইনভেন্টরি ও সেলস ম্যানেজমেন্ট',
+    phone: shopSettings?.phone || '017XXXXXXXX',
+    email: shopSettings?.email || 'info@restbazer.com',
+    address: shopSettings?.address || 'Savar, Dhaka, Bangladesh',
+    currency: shopSettings?.currency || '৳',
+    headerTitle: shopSettings?.headerTitle || shopSettings?.name || 'REST BAZER',
+    headerSubtitle: shopSettings?.headerSubtitle || 'স্মার্ট ইনভেন্টরি ও সেলস ম্যানেজমেন্ট',
+    headerBgColor: shopSettings?.headerBgColor || '#1e1e5f',
+    headerTextColor: shopSettings?.headerTextColor || '#ffffff',
+    headerSubtitleColor: shopSettings?.headerSubtitleColor || '#fcd34d',
+    tagline: shopSettings?.headerSubtitle || 'স্মার্ট ইনভেন্টরি ও সেলস ম্যানেজমেন্ট',
     invoicePrefix: 'INV-HQ-',
+    logoUrl: shopSettings?.logoUrl || '',
     status: 'active',
     isDefault: true,
     createdAt: '2025-01-01T00:00:00.000Z'
-  };
+  }), [shopSettings]);
 
   const formatCompaniesList = useCallback((val: any): CompanyBranch[] => {
     const arr = ensureArray(val) as CompanyBranch[];
     if (!arr || arr.length === 0) {
-      return [DEFAULT_MAIN_COMPANY];
+      return [defaultMainCompany];
     }
 
     const hasMain = arr.some(c => c.id === 'company-main');
@@ -235,12 +237,36 @@ const App: React.FC = () => {
 
     let result = [...arr];
     if (!hasMain) {
-      result = [{ ...DEFAULT_MAIN_COMPANY, isDefault: !hasDefault }, ...result];
-    } else if (!hasDefault) {
-      result = result.map(c => c.id === 'company-main' ? { ...c, isDefault: true } : c);
+      result = [{ ...defaultMainCompany, isDefault: !hasDefault }, ...result];
+    } else {
+      result = result.map(c => {
+        if (c.id === 'company-main') {
+          const compName = c.name || defaultMainCompany.name;
+          const compHeaderTitle = (c.headerTitle && c.headerTitle.trim() !== '' && c.headerTitle !== 'REST BAZER')
+            ? c.headerTitle
+            : compName;
+
+          return {
+            ...c,
+            isDefault: !hasDefault ? true : c.isDefault,
+            name: compName,
+            headerTitle: compHeaderTitle,
+            headerSubtitle: c.headerSubtitle !== undefined ? c.headerSubtitle : defaultMainCompany.headerSubtitle,
+            logoUrl: c.logoUrl !== undefined ? c.logoUrl : defaultMainCompany.logoUrl,
+            headerBgColor: c.headerBgColor || defaultMainCompany.headerBgColor,
+            headerTextColor: c.headerTextColor || defaultMainCompany.headerTextColor,
+            headerSubtitleColor: c.headerSubtitleColor || defaultMainCompany.headerSubtitleColor
+          };
+        }
+        return {
+          ...c,
+          name: c.name || 'নতুন কোম্পানি',
+          headerTitle: (c.headerTitle && c.headerTitle.trim() !== '' && c.headerTitle !== 'REST BAZER') ? c.headerTitle : (c.name || 'নতুন কোম্পানি')
+        };
+      });
     }
     return result;
-  }, []);
+  }, [defaultMainCompany]);
 
   const generateId = (prefix: string = '') => {
     return `${prefix}${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
@@ -586,9 +612,27 @@ const App: React.FC = () => {
 
             // Helper to subscribe to all administrative collections
             let adminSubscribed = false;
+            let customerProfileUnsub: (() => void) | null = null;
+            let customerSalesUnsub: (() => void) | null = null;
+            let customerWalletUnsub: (() => void) | null = null;
+
             const subscribeAdminCollections = () => {
               if (adminSubscribed) return;
               adminSubscribed = true;
+
+              // Detach customer listeners so they do not override admin collections
+              if (customerSalesUnsub) {
+                customerSalesUnsub();
+                customerSalesUnsub = null;
+              }
+              if (customerProfileUnsub) {
+                customerProfileUnsub();
+                customerProfileUnsub = null;
+              }
+              if (customerWalletUnsub) {
+                customerWalletUnsub();
+                customerWalletUnsub = null;
+              }
 
               const adminCollections = [
                 { path: 'roles', setter: setRoles },
@@ -614,6 +658,7 @@ const App: React.FC = () => {
                 { path: 'companies', setter: (v: any) => setCompanies(formatCompaniesList(v)) },
                 { path: 'staff', setter: setStaff },
                 { path: 'wallet_transactions', setter: (v: any) => setWalletTransactions(ensureArray(v).sort((a: any, b: any) => (b.createdAt || '').localeCompare(a.createdAt || ''))) },
+                { path: 'billing_records', setter: (v: any) => setBillingRecords(ensureArray(v).sort((a: any, b: any) => (b.createdAt || '').localeCompare(a.createdAt || ''))) },
               ];
 
               adminCollections.forEach(({ path, setter }) => {
@@ -634,7 +679,8 @@ const App: React.FC = () => {
               setLoading(false);
             } else {
               // Customer listener
-              const customerUnsubscribe = onSnapshot(doc(db, 'customers', currentUser.uid), (snap) => {
+              customerProfileUnsub = onSnapshot(doc(db, 'customers', currentUser.uid), (snap) => {
+                if (adminSubscribed) return;
                 const data = snap.data() as Customer;
                 if (data) {
                   setActiveCustomer(data);
@@ -643,23 +689,25 @@ const App: React.FC = () => {
               }, (err) => {
                 console.warn("Customer profile restricted.");
               });
-              listenersRef.current.push(customerUnsubscribe);
+              listenersRef.current.push(customerProfileUnsub);
 
               const salesQuery = query(collection(db, 'sales'), where('customerId', '==', currentUser.uid));
-              const salesUnsubscribe = onSnapshot(salesQuery, (snapshot) => {
+              customerSalesUnsub = onSnapshot(salesQuery, (snapshot) => {
+                if (adminSubscribed) return;
                 setSales(ensureArray(snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id }))));
               }, (err) => {
                 console.warn("Customer sales restricted.");
               });
-              listenersRef.current.push(salesUnsubscribe);
+              listenersRef.current.push(customerSalesUnsub);
 
               const walletQuery = query(collection(db, 'wallet_transactions'), where('customerId', '==', currentUser.uid));
-              const walletUnsubscribe = onSnapshot(walletQuery, (snapshot) => {
+              customerWalletUnsub = onSnapshot(walletQuery, (snapshot) => {
+                if (adminSubscribed) return;
                 setWalletTransactions(ensureArray(snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id }))).sort((a: any, b: any) => (b.createdAt || '').localeCompare(a.createdAt || '')));
               }, (err) => {
                 console.warn("Customer wallet restricted:", err.message);
               });
-              listenersRef.current.push(walletUnsubscribe);
+              listenersRef.current.push(customerWalletUnsub);
 
               // Check if user is a Company Admin in companies collection
               try {
@@ -1141,6 +1189,45 @@ const App: React.FC = () => {
     updateFirebase('sales', saleData);
     updateFirebase('activities', newActivity);
 
+    // Check if the sale's company has a commission or hybrid billing model configured
+    const saleCompanyId = saleData.companyId;
+    if (saleCompanyId && saleCompanyId !== 'company-main') {
+      const companyObj = companies.find(c => c.id === saleCompanyId);
+      if (companyObj && (companyObj.billingModel === 'commission' || companyObj.billingModel === 'hybrid')) {
+        const commConfig = companyObj.commissionConfig;
+        if (commConfig && commConfig.status !== 'inactive') {
+          let commissionAmount = 0;
+          if (commConfig.type === 'percentage') {
+            commissionAmount = Math.round(((newSale.total * (commConfig.rate || 0)) / 100) * 100) / 100;
+          } else {
+            commissionAmount = commConfig.rate || 0;
+          }
+
+          if (commissionAmount > 0) {
+            const billingRecord: CompanyBillingRecord = {
+              id: `bill-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
+              companyId: saleCompanyId,
+              companyName: companyObj.name,
+              type: 'commission',
+              title: `সেলস কমিশন: ইনভয়েস #${newSale.invoiceNo}`,
+              description: `বিক্রয় মূল্য ৳${newSale.total.toLocaleString()} এর উপর কমিশন (${commConfig.type === 'percentage' ? commConfig.rate + '%' : '৳' + commConfig.rate})`,
+              amount: commissionAmount,
+              status: 'pending',
+              dueDate: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
+              invoiceNo: newSale.invoiceNo,
+              saleId: newSale.id,
+              saleAmount: newSale.total,
+              commissionRate: commConfig.rate,
+              createdAt: new Date().toISOString()
+            };
+
+            setBillingRecords(prev => [billingRecord, ...prev]);
+            updateFirebase('billing_records', billingRecord);
+          }
+        }
+      }
+    }
+
     if (!isApprovalRequired) {
       setProducts(updatedProducts);
       setCustomers(updatedCustomers);
@@ -1312,9 +1399,53 @@ const App: React.FC = () => {
     updateFirebase('activities', newActivity);
   };
 
-  const handleUpdateShopSettings = (settings: any) => {
+  const handleUpdateShopSettings = async (settings: any) => {
     setShopSettings(settings);
-    updateFirebase('settings', settings, 'config');
+    await updateFirebase('settings', settings, 'config');
+
+    // Also synchronize to the active company or main company in companies list
+    const targetCompId = (activeCompanyId && activeCompanyId !== 'all') 
+      ? activeCompanyId 
+      : (companies.find(c => c.isDefault)?.id || 'company-main');
+
+    const existingComp = companies.find(c => c.id === targetCompId) || {
+      id: targetCompId,
+      name: settings.name || 'REST BAZER',
+      code: 'HQ-01',
+      status: 'active' as const,
+      isDefault: true,
+      createdAt: new Date().toISOString()
+    };
+
+    const updatedComp: CompanyBranch = {
+      ...existingComp,
+      name: settings.name?.trim() || settings.headerTitle?.trim() || existingComp.name || 'REST BAZER',
+      headerTitle: settings.headerTitle?.trim() || settings.name?.trim() || existingComp.headerTitle || 'REST BAZER',
+      headerSubtitle: settings.headerSubtitle !== undefined ? settings.headerSubtitle : (existingComp.headerSubtitle || ''),
+      logoUrl: settings.logoUrl !== undefined ? settings.logoUrl : (existingComp.logoUrl || ''),
+      headerBgColor: settings.headerBgColor || existingComp.headerBgColor || '#1e1e5f',
+      headerTextColor: settings.headerTextColor || existingComp.headerTextColor || '#ffffff',
+      headerSubtitleColor: settings.headerSubtitleColor || existingComp.headerSubtitleColor || '#fcd34d',
+      phone: settings.phone !== undefined ? settings.phone : (existingComp.phone || ''),
+      email: settings.email !== undefined ? settings.email : (existingComp.email || ''),
+      address: settings.address !== undefined ? settings.address : (existingComp.address || ''),
+      currency: settings.currency || existingComp.currency || '৳',
+      updatedAt: new Date().toISOString()
+    };
+
+    setCompanies(prev => {
+      const exists = prev.some(c => c.id === targetCompId);
+      if (exists) {
+        return prev.map(c => c.id === targetCompId ? updatedComp : c);
+      }
+      return [...prev, updatedComp];
+    });
+
+    await updateFirebase('companies', updatedComp, targetCompId);
+
+    try {
+      document.title = `${updatedComp.name || 'REST BAZER'} - Business Management`;
+    } catch (e) {}
   };
 
   const handleBackupData = useCallback(() => {
@@ -1401,7 +1532,7 @@ const App: React.FC = () => {
   }, [activeCompanyId, companies]);
 
   const isItemInActiveCompany = useCallback((itemCompanyId?: string) => {
-    // 1. Master Owner / Admin can select 'all' to see aggregated data across all companies
+    // 1. All Data / Combined View shows EVERYTHING across all branches and legacy records
     if (activeCompanyId === 'all') return true;
     
     // 2. Identify the main / default company
@@ -1413,6 +1544,7 @@ const App: React.FC = () => {
     // 3. If an item has an explicit companyId:
     if (itemCompanyId) {
       if (itemCompanyId === activeCompanyId) return true;
+      if (itemCompanyId === 'all') return true;
       // If it belongs to 'company-main' or default company and active view is the main/default company:
       if (isViewingMainCompany && (itemCompanyId === 'company-main' || itemCompanyId === defaultComp?.id)) {
         return true;
@@ -1420,10 +1552,9 @@ const App: React.FC = () => {
       return false;
     }
 
-    // 4. If an item has NO companyId (all legacy unassigned data created before multi-branch):
-    // It belongs to the Main App (REST BAZER প্রধান শাখা).
-    // It is visible when viewing the Main Company, or when only 1 company exists.
-    return isViewingMainCompany;
+    // 4. If an item has NO companyId (all legacy data created before multi-company):
+    // Always preserve and show legacy data so historical records and catalog items are never missing in the admin app!
+    return true;
   }, [activeCompanyId, companies]);
 
   // Dynamic filtered lists strictly isolated according to active branch/company
@@ -1452,15 +1583,20 @@ const App: React.FC = () => {
 
   const effectiveShopSettings = useMemo(() => {
     if (activeCompany) {
+      const compName = activeCompany.name || shopSettings.name;
+      const compHeaderTitle = (activeCompany.headerTitle && activeCompany.headerTitle.trim() !== '' && activeCompany.headerTitle !== 'REST BAZER')
+        ? activeCompany.headerTitle
+        : compName;
+
       return {
         ...shopSettings,
-        name: activeCompany.name || shopSettings.name,
+        name: compName,
         phone: activeCompany.phone || shopSettings.phone,
         email: activeCompany.email || shopSettings.email,
         address: activeCompany.address || shopSettings.address,
         currency: activeCompany.currency || shopSettings.currency,
         logoUrl: activeCompany.logoUrl || shopSettings.logoUrl,
-        headerTitle: activeCompany.headerTitle || activeCompany.name || shopSettings.headerTitle,
+        headerTitle: compHeaderTitle,
         headerSubtitle: activeCompany.headerSubtitle || activeCompany.tagline || shopSettings.headerSubtitle,
         headerBgColor: activeCompany.headerBgColor || shopSettings.headerBgColor,
         headerTextColor: activeCompany.headerTextColor || shopSettings.headerTextColor,
@@ -1486,31 +1622,77 @@ const App: React.FC = () => {
       alert("কোম্পানি যুক্ত বা এডিট করার অনুমতি শুধুমাত্র অ্যাডমিন ও প্রধান সিস্টেম ওনারের রয়েছে।");
       return;
     }
-    const existing = companies.find(c => c.id === company.id);
+    const finalName = company.name?.trim() || 'REST BAZER';
+    const finalHeaderTitle = (company.headerTitle && company.headerTitle.trim() !== '' && company.headerTitle !== 'REST BAZER')
+      ? company.headerTitle.trim()
+      : finalName;
+
+    const companyToSave: CompanyBranch = {
+      ...company,
+      name: finalName,
+      headerTitle: finalHeaderTitle,
+    };
+
+    const existing = companies.find(c => c.id === companyToSave.id);
     let updatedList: CompanyBranch[];
-    if (company.isDefault) {
+    if (companyToSave.isDefault) {
       updatedList = companies.map(c => ({
         ...c,
-        isDefault: c.id === company.id
+        isDefault: c.id === companyToSave.id
       }));
-      if (!existing) updatedList.push(company);
-      else updatedList = updatedList.map(c => c.id === company.id ? company : c);
+      if (!existing) updatedList.push(companyToSave);
+      else updatedList = updatedList.map(c => c.id === companyToSave.id ? companyToSave : c);
     } else {
       if (existing) {
-        updatedList = companies.map(c => c.id === company.id ? company : c);
+        updatedList = companies.map(c => c.id === companyToSave.id ? companyToSave : c);
       } else {
-        updatedList = [...companies, company];
+        updatedList = [...companies, companyToSave];
       }
     }
     setCompanies(updatedList);
-    await updateFirebase('companies', company, company.id);
-    if (company.isDefault) {
+    await updateFirebase('companies', companyToSave, companyToSave.id);
+    if (companyToSave.isDefault) {
       for (const c of updatedList) {
-        if (c.id !== company.id && c.isDefault) {
+        if (c.id !== companyToSave.id && c.isDefault) {
           await updateFirebase('companies', { ...c, isDefault: false }, c.id);
         }
       }
     }
+
+    // Synchronize shopSettings with company if it is active, default, or main
+    if (companyToSave.id === activeCompanyId || companyToSave.isDefault || companyToSave.id === 'company-main' || activeCompanyId === 'all') {
+      const updatedSettings = {
+        ...shopSettings,
+        name: finalName,
+        headerTitle: finalHeaderTitle,
+        headerSubtitle: companyToSave.headerSubtitle !== undefined ? companyToSave.headerSubtitle : (companyToSave.tagline || shopSettings.headerSubtitle),
+        logoUrl: companyToSave.logoUrl !== undefined ? companyToSave.logoUrl : shopSettings.logoUrl,
+        headerBgColor: companyToSave.headerBgColor || shopSettings.headerBgColor,
+        headerTextColor: companyToSave.headerTextColor || shopSettings.headerTextColor,
+        headerSubtitleColor: companyToSave.headerSubtitleColor || shopSettings.headerSubtitleColor,
+        phone: companyToSave.phone || shopSettings.phone,
+        email: companyToSave.email || shopSettings.email,
+        address: companyToSave.address || shopSettings.address,
+        currency: companyToSave.currency || shopSettings.currency,
+      };
+      setShopSettings(updatedSettings);
+      await updateFirebase('settings', updatedSettings, 'config');
+    }
+
+    try {
+      document.title = `${finalName || 'REST BAZER'} - Business Management`;
+    } catch (e) {}
+  };
+
+  const handleSaveBillingRecord = async (record: CompanyBillingRecord) => {
+    setBillingRecords(prev => {
+      const exists = prev.some(r => r.id === record.id);
+      if (exists) {
+        return prev.map(r => r.id === record.id ? record : r);
+      }
+      return [record, ...prev];
+    });
+    await updateFirebase('billing_records', record, record.id);
   };
 
   const handleDeleteCompany = async (companyId: string) => {
@@ -2247,6 +2429,9 @@ const App: React.FC = () => {
               sales={sales}
               staff={staff}
               isAdmin={isAdminSession}
+              billingRecords={billingRecords}
+              onSaveBillingRecord={handleSaveBillingRecord}
+              shopSettings={effectiveShopSettings}
             />
           ) : (
             <div className="p-8 text-center bg-white rounded-3xl border border-slate-200 shadow-sm max-w-lg mx-auto mt-12 space-y-4">

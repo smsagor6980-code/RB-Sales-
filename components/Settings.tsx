@@ -1628,7 +1628,18 @@ const Settings: React.FC<SettingsProps> = ({
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
                    <div className="space-y-3">
                       <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">Business Name (ইনভয়েসের নাম)</label>
-                      <input className="w-full border-2 border-slate-100 rounded-2xl p-4 font-black text-base bg-slate-50 outline-none focus:bg-white focus:ring-4 focus:ring-primary/5 transition-all" value={shopData.name || ''} onChange={e => setShopData({...shopData, name: e.target.value})} />
+                      <input 
+                        className="w-full border-2 border-slate-100 rounded-2xl p-4 font-black text-base bg-slate-50 outline-none focus:bg-white focus:ring-4 focus:ring-primary/5 transition-all" 
+                        value={shopData.name || ''} 
+                        onChange={e => {
+                          const newName = e.target.value;
+                          setShopData(prev => ({
+                            ...prev,
+                            name: newName,
+                            headerTitle: (!prev.headerTitle || prev.headerTitle === prev.name || prev.headerTitle === 'REST BAZER') ? newName : prev.headerTitle
+                          }));
+                        }} 
+                      />
                    </div>
                    <div className="space-y-3">
                       <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">Contact Hotline</label>
@@ -1648,7 +1659,16 @@ const Settings: React.FC<SettingsProps> = ({
                    <textarea rows={3} className="w-full border-2 border-slate-100 rounded-2xl p-4 font-black text-base bg-slate-50 outline-none focus:bg-white focus:ring-4 focus:ring-primary/5 transition-all" value={shopData.address || ''} onChange={e => setShopData({...shopData, address: e.target.value})} />
                 </div>
                 <div className="pt-6 border-t-2 border-slate-50">
-                   <button onClick={() => onUpdateShopSettings(shopData)} className="w-full bg-primary text-white py-5 rounded-[28px] font-black uppercase text-sm tracking-[4px] shadow-2xl shadow-primary/30 active:scale-[0.98] transition-all flex items-center justify-center gap-4">
+                   <button 
+                     onClick={() => {
+                       const finalName = shopData.name?.trim() || 'REST BAZER';
+                       const finalHeaderTitle = (!shopData.headerTitle || shopData.headerTitle.trim() === '' || shopData.headerTitle === 'REST BAZER' || shopData.headerTitle === shopSettings.name)
+                         ? finalName
+                         : shopData.headerTitle.trim();
+                       onUpdateShopSettings({ ...shopData, name: finalName, headerTitle: finalHeaderTitle });
+                     }} 
+                     className="w-full bg-primary text-white py-5 rounded-[28px] font-black uppercase text-sm tracking-[4px] shadow-2xl shadow-primary/30 active:scale-[0.98] transition-all flex items-center justify-center gap-4"
+                   >
                       <Save size={22}/> সব পরিবর্তন সংরক্ষণ করুন (Save All Settings)
                    </button>
                 </div>
